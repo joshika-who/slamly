@@ -25,14 +25,14 @@
   /* Typography & Ink Colours (WCAG 2.1 AA >= 4.5:1 on all light/pastel surfaces) */
   --color-ink: #261f1c;
   --color-ink-muted: #52423a;
-  --color-ink-soft: #6b584e;
-  --color-border: #dcd0c2;
+  --color-ink-soft: #5c4b42;
+  --color-border: #8a796d;
   --color-border-strong: #3d312b;
 
   /* Semantic Feedback Colours (WCAG AA compliant) */
   --color-error-bg: #fde8ec;
   --color-error-text: #8c1d35;
-  --color-error-border: #d96b82;
+  --color-error-border: #b83b56;
   --color-success-bg: #e3f3e8;
   --color-success-text: #1c5232;
   --color-info-bg: #eee8fa;

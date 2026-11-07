@@ -149,7 +149,8 @@ export default function BookCard({
           }}
         >
           <span className={`status-badge ${statusMeta.badgeClass}`}>
-            {statusMeta.label}
+            <span aria-hidden="true">{statusMeta.icon}</span>
+            <span>{statusMeta.label}</span>
           </span>
           <span
             style={{

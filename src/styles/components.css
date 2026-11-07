@@ -514,6 +514,12 @@
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+.form-input::placeholder,
+.form-textarea::placeholder {
+  color: var(--color-ink-soft);
+  opacity: 1;
+}
+
 .form-input:focus,
 .form-select:focus,
 .form-textarea:focus {
@@ -661,7 +667,7 @@
 .status-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   padding: 4px 12px;
   border-radius: var(--radius-pill);
   border: 1.5px solid var(--color-ink);
@@ -674,14 +680,17 @@
 
 .status-badge.status-active {
   background: var(--pastel-sage);
+  border-style: solid;
 }
 
 .status-badge.status-draft {
   background: var(--pastel-butter);
+  border-style: dashed;
 }
 
 .status-badge.status-closed {
   background: var(--pastel-peach);
+  border-width: 2px;
 }
 
 .book-card-body {
@@ -2985,4 +2994,242 @@
     page-break-inside: avoid;
   }
 }
+
+/* ==========================================================================
+   19. MILESTONE 8: PRIVACY, TERMS, ACCOUNT PAGE & SMALL-VIEWPORT POLISH
+   ========================================================================== */
+
+.legal-page,
+.account-page {
+  padding: 36px 0 80px;
+}
+
+.legal-card {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 36px 30px;
+}
+
+.legal-disclaimer {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-ink);
+  background: var(--pastel-butter);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-ink);
+  text-align: center;
+  margin-bottom: 22px;
+}
+
+.legal-card__header {
+  text-align: center;
+  margin-bottom: 24px;
+  padding-bottom: 18px;
+  border-bottom: 2px dashed var(--color-border-strong);
+}
+
+.legal-card__stickers {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.legal-card__title {
+  font-size: clamp(2rem, 4vw, 2.75rem);
+  margin: 10px 0 6px;
+}
+
+.legal-card__updated {
+  font-size: 0.9rem;
+  color: var(--color-ink-muted);
+  margin: 0;
+}
+
+.legal-content {
+  padding: 24px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-ink);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.legal-section h2 {
+  font-size: 1.5rem;
+  margin-bottom: 6px;
+  color: var(--color-ink);
+}
+
+.legal-section p {
+  font-size: 0.96rem;
+  line-height: 1.6;
+  color: var(--color-ink);
+  margin-bottom: 8px;
+}
+
+.legal-section p:last-child {
+  margin-bottom: 0;
+}
+
+.legal-section ul {
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.96rem;
+  line-height: 1.55;
+  color: var(--color-ink);
+}
+
+.legal-section a {
+  text-decoration: underline;
+  font-weight: 700;
+}
+
+.legal-card__footer {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1.5px dashed var(--color-border);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.form-legal-note {
+  font-size: 0.86rem;
+  color: var(--color-ink-muted);
+  text-align: center;
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+
+.public-submit-notice {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-ink);
+  margin: 0;
+  line-height: 1.45;
+  max-width: 440px;
+}
+
+/* Account Page Cards */
+.account-profile-card,
+.account-danger-card {
+  max-width: 720px;
+  margin: 0 auto 28px;
+  padding: 32px 28px;
+}
+
+.account-danger-card {
+  border-color: var(--color-ink);
+  background: #fffafa;
+}
+
+.account-profile-card__header,
+.account-danger-card__header {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1.5px dashed var(--color-border-strong);
+}
+
+.account-profile-card__title,
+.account-danger-card__title {
+  font-size: clamp(1.85rem, 3.5vw, 2.35rem);
+  margin: 8px 0 6px;
+}
+
+.account-profile-card__subtitle,
+.account-danger-card__subtitle {
+  color: var(--color-ink-muted);
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.account-details-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin: 0 0 20px;
+}
+
+.account-details-item {
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-ink);
+  background: var(--bg-cream);
+}
+
+.account-details-item__label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-ink-soft);
+  margin-bottom: 4px;
+}
+
+.account-details-item__value {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--color-ink);
+  word-break: break-word;
+}
+
+.account-profile-card__links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.account-danger-list {
+  padding-left: 20px;
+  margin: 10px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.93rem;
+  color: var(--color-ink);
+}
+
+.account-delete-form {
+  max-width: 480px;
+}
+
+.account-delete-form__actions {
+  margin-top: 20px;
+}
+
+/* Ensure 320px viewport & 200% zoom never overflow horizontally */
+@media (max-width: 420px) {
+  .books-grid,
+  .templates-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .paper-card,
+  .legal-card,
+  .account-profile-card,
+  .account-danger-card {
+    padding: 20px 14px;
+  }
+
+  .legal-content {
+    padding: 16px 12px;
+  }
+
+  .brand-badge {
+    display: none;
+  }
+
+  .preview-mode-banner__content {
+    min-width: 0;
+  }
+}
+
 

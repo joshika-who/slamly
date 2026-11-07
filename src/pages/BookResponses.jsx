@@ -23,6 +23,7 @@ import {
   fetchAllResponses,
   scanUnsupportedPdfCharacters,
 } from '../services/pdfExportService';
+import { useModalFocusTrap } from '../utils/useModalFocusTrap';
 import {
   FlowerSticker,
   HeartSticker,
@@ -104,6 +105,19 @@ function BookResponses() {
   const [responseToDelete, setResponseToDelete] = useState(null);
   const [isDeletingResponse, setIsDeletingResponse] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+
+  const pdfWarningModalRef = useModalFocusTrap(
+    Boolean(pendingPdfWarning),
+    () => setPendingPdfWarning(null)
+  );
+  const deleteResponseModalRef = useModalFocusTrap(
+    Boolean(responseToDelete),
+    () => {
+      if (!isDeletingResponse) {
+        setResponseToDelete(null);
+      }
+    }
+  );
 
   const shareUrl = getBookShareUrl(bookId);
 
@@ -555,7 +569,8 @@ function BookResponses() {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
                 <span className={`status-badge ${statusMeta.badgeClass}`}>
-                  {statusMeta.label}
+                  <span aria-hidden="true">{statusMeta.icon}</span>
+                  <span>{statusMeta.label}</span>
                 </span>
                 <span className="badge badge--lavender">
                   {totalCount} {totalCount === 1 ? 'Response' : 'Responses'}
@@ -1055,14 +1070,14 @@ function BookResponses() {
           aria-modal="true"
           aria-labelledby="pdf-char-warning-title"
         >
-          <div className="paper-card modal-card">
+          <div ref={pdfWarningModalRef} className="paper-card modal-card" tabIndex={-1}>
             <span className="washi-tape tape-lavender" aria-hidden="true" />
             <div className="modal-card__header">
               <div>
                 <span className="badge badge--peach">Character Support Notice</span>
-                <h3 id="pdf-char-warning-title" className="modal-card__title">
+                <h2 id="pdf-char-warning-title" className="modal-card__title">
                   Some characters cannot be rendered in standard PDF fonts
-                </h3>
+                </h2>
                 <p className="modal-card__subtitle">
                   The built-in PDF fonts support standard Latin letters (including accented characters
                   like &eacute; and &ntilde;), numbers, and punctuation, but cannot render emoji or
@@ -1130,14 +1145,14 @@ function BookResponses() {
           aria-modal="true"
           aria-labelledby="delete-response-modal-title"
         >
-          <div className="paper-card modal-card">
+          <div ref={deleteResponseModalRef} className="paper-card modal-card" tabIndex={-1}>
             <span className="washi-tape washi-tape--pink" aria-hidden="true" />
             <div className="modal-card__header">
               <div>
                 <span className="badge badge--pink">Confirm Response Deletion</span>
-                <h3 id="delete-response-modal-title" className="modal-card__title">
+                <h2 id="delete-response-modal-title" className="modal-card__title">
                   Delete {responseToDelete.respondentName}&rsquo;s response?
-                </h3>
+                </h2>
                 <p className="modal-card__subtitle">
                   This permanently removes <strong>{responseToDelete.respondentName}</strong>&rsquo;s
                   keepsake page from <strong>&ldquo;{book.title}&rdquo;</strong>. This action cannot

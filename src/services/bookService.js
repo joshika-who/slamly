@@ -34,16 +34,19 @@ export const ALLOWED_BOOK_STATUSES = ['draft', 'published', 'closed'];
 export const BOOK_STATUS_META = {
   draft: {
     label: 'Draft',
+    icon: '✎',
     badgeClass: 'status-draft',
     shortNote: 'Private — only you can see this book. The public link is turned off.',
   },
   published: {
     label: 'Published',
+    icon: '●',
     badgeClass: 'status-active',
     shortNote: 'Open — anyone with your share link can fill out and submit a page.',
   },
   closed: {
     label: 'Closed',
+    icon: '■',
     badgeClass: 'status-closed',
     shortNote: 'Closed — your share link shows that this slam book is no longer accepting responses.',
   },

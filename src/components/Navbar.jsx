@@ -92,14 +92,24 @@ export default function Navbar() {
               </a>
             </li>
             {user && (
-              <li>
-                <Link
-                  to="/create"
-                  className={`nav-link ${location.pathname.startsWith('/create') ? 'active' : ''}`}
-                >
-                  Create book
-                </Link>
-              </li>
+              <>
+                <li>
+                  <Link
+                    to="/create"
+                    className={`nav-link ${location.pathname.startsWith('/create') ? 'active' : ''}`}
+                  >
+                    Create book
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    to="/account"
+                    className={`nav-link ${location.pathname === '/account' ? 'active' : ''}`}
+                  >
+                    Account
+                  </Link>
+                </li>
+              </>
             )}
           </ul>
         </nav>
@@ -184,9 +194,14 @@ export default function Navbar() {
             Features
           </a>
           {user && (
-            <Link to="/create" className="nav-link">
-              Create book
-            </Link>
+            <>
+              <Link to="/create" className="nav-link">
+                Create book
+              </Link>
+              <Link to="/account" className="nav-link">
+                Account
+              </Link>
+            </>
           )}
 
           <div className="mobile-drawer-actions">

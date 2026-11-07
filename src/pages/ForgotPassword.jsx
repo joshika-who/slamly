@@ -87,9 +87,9 @@ function ForgotPassword() {
               <span>Account Recovery</span>
             </div>
 
-            <h1 className="auth-showcase__title">
+            <h2 className="auth-showcase__title">
               Lost the key to your slam book shelf?
-            </h1>
+            </h2>
 
             <p className="auth-showcase__subtitle">
               No worries at all. Enter your email address and we&rsquo;ll send you a secure link to
@@ -122,9 +122,9 @@ function ForgotPassword() {
 
             <div className="auth-card__header">
               <SlamlyLogoMark size={40} />
-              <h2 id="forgot-password-heading" className="auth-card__title">
+              <h1 id="forgot-password-heading" className="auth-card__title">
                 Reset your password
-              </h2>
+              </h1>
               <p className="auth-card__subtitle">
                 Enter your email address to receive a password reset link.
               </p>

@@ -838,8 +838,15 @@ function PublicBook() {
 
                 {/* Submit Bar */}
                 <div className="public-submit-bar">
-                  <p className="form-hint" style={{ margin: 0 }}>
-                    Once submitted, your page is saved privately for the slam book owner.
+                  <p className="public-submit-notice">
+                    Your name, answers and photo will be visible to the owner of this book.{' '}
+                    <Link to="/privacy" className="auth-switch-link">
+                      Privacy
+                    </Link>{' '}
+                    &bull;{' '}
+                    <Link to="/terms" className="auth-switch-link">
+                      Terms
+                    </Link>
                   </p>
                   <Button
                     type="submit"

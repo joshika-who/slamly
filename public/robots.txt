@@ -1,0 +1,9 @@
+User-agent: *
+Disallow: /dashboard
+Disallow: /create
+Disallow: /books/
+Disallow: /account
+Disallow: /login
+Disallow: /signup
+Disallow: /s/
+

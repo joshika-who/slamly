@@ -106,9 +106,9 @@ function Login() {
               <span>Welcome Back, Memory Keeper</span>
             </div>
 
-            <h1 className="auth-showcase__title">
+            <h2 className="auth-showcase__title">
               Open your shelf and read what your friends wrote.
-            </h1>
+            </h2>
 
             <p className="auth-showcase__subtitle">
               From midnight hostel confessions to last-day-of-school signatures, your personal
@@ -142,9 +142,9 @@ function Login() {
 
             <div className="auth-card__header">
               <SlamlyLogoMark size={40} />
-              <h2 id="login-heading" className="auth-card__title">
+              <h1 id="login-heading" className="auth-card__title">
                 Log in to Slamly
-              </h2>
+              </h1>
               <p className="auth-card__subtitle">
                 Enter your details to open your personal slam book dashboard.
               </p>

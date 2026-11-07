@@ -433,7 +433,8 @@ function EditBook() {
                   Sharing &amp; Book Status
                 </h2>
                 <span className={`status-badge ${savedStatusMeta.badgeClass}`}>
-                  {savedStatusMeta.label}
+                  <span aria-hidden="true">{savedStatusMeta.icon}</span>
+                  <span>{savedStatusMeta.label}</span>
                 </span>
               </div>
               <p className="book-status-note" style={{ marginTop: '6px', marginBottom: 0 }}>

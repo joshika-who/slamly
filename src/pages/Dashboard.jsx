@@ -10,6 +10,7 @@ import {
   updateBook,
 } from '../services/bookService';
 import { getResponseCount } from '../services/responseService';
+import { useModalFocusTrap } from '../utils/useModalFocusTrap';
 import {
   FlowerSticker,
   HeartSticker,
@@ -58,6 +59,15 @@ function Dashboard() {
   const [deleteError, setDeleteError] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const hasSyncedPublicBooksRef = useRef(false);
+
+  const deleteModalRef = useModalFocusTrap(
+    Boolean(bookToDelete),
+    () => {
+      if (!isDeleting) {
+        setBookToDelete(null);
+      }
+    }
+  );
 
   const loadBooks = useCallback(async () => {
     if (!user?.uid) return;
@@ -251,8 +261,11 @@ function Dashboard() {
               <Button to="/create" variant="primary" size="lg">
                 + Create new slam book
               </Button>
+              <Button to="/account" variant="secondary" size="lg">
+                Account settings
+              </Button>
               <Button
-                variant="secondary"
+                variant="ghost"
                 size="lg"
                 onClick={handleLogout}
                 disabled={isLoggingOut}
@@ -409,14 +422,14 @@ function Dashboard() {
           aria-modal="true"
           aria-labelledby="delete-modal-title"
         >
-          <div className="paper-card modal-card">
+          <div ref={deleteModalRef} className="paper-card modal-card" tabIndex={-1}>
             <span className="washi-tape washi-tape--pink" aria-hidden="true" />
             <div className="modal-card__header">
               <div>
                 <span className="badge badge--pink">Confirm Deletion</span>
-                <h3 id="delete-modal-title" className="modal-card__title">
+                <h2 id="delete-modal-title" className="modal-card__title">
                   Delete &ldquo;{bookToDelete.title}&rdquo;?
-                </h3>
+                </h2>
                 <p className="modal-card__subtitle">
                   This action permanently removes this slam book, all of its questions, and{' '}
                   <strong>all friend responses</strong> collected for it. This cannot be undone.

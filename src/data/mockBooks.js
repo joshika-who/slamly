@@ -1,112 +1,14 @@
 /**
  * ============================================================================
- * SLAMLY — SAMPLE / MOCK DATA FOR MILESTONE 1
+ * SLAMLY — STARTER BOOK TEMPLATES
  * ============================================================================
- * IMPORTANT ARCHITECTURAL NOTE:
- * This file contains static sample data used exclusively for Milestone 1 UI
- * previews. In Milestone 2+, these will be replaced by live Cloud Firestore
- * queries scoped to the authenticated Firebase user (`users/{uid}/books`).
+ * Curated ready-made slam book templates for Friendship, College Memories,
+ * School Farewell, Birthday, and Get to Know Me.
+ * When a user creates a book from a template, questions are deep-copied into
+ * their Firestore `books/{bookId}` document so future template edits never
+ * alter existing user books.
  * ============================================================================
  */
-
-export const MOCK_USER_PROFILE = {
-  displayName: 'Aanya',
-  tagline: 'Keeping little notes from my favourite people',
-};
-
-export const MOCK_SLAM_BOOKS = [
-  {
-    id: 'book-class-of-2026',
-    title: 'Class of 2026 — Final Semester Slam Book',
-    subtitle: 'Hostel wing 3B, late-night chai runs & classroom memories',
-    coverColor: '#FAD2DD',
-    tapeClass: '',
-    themeName: 'Rose Quartz Journal',
-    status: 'Open',
-    statusCode: 'active',
-    responseCount: 18,
-    questionCount: 10,
-    lastUpdated: '2 hours ago',
-    shareSlug: 'slamly.app/s/class-of-2026-x9k2',
-    sampleResponses: [
-      {
-        friendName: 'Rohan ("Ro")',
-        submittedAt: 'Oct 28',
-        favoriteMemory: 'Getting locked out on the terrace during exam week with 4 cups of Maggi!',
-        oneWordForMe: 'Unstoppable',
-        songDedication: 'Purani Jeans — Ali Haider',
-      },
-      {
-        friendName: 'Meera K.',
-        submittedAt: 'Oct 29',
-        favoriteMemory: 'Our 3 AM project debugging session that turned into a karaoke night.',
-        oneWordForMe: 'Sunshine',
-        songDedication: 'Ilahi — Yeh Jawaani Hai Deewani',
-      },
-    ],
-  },
-  {
-    id: 'book-inner-circle',
-    title: 'My Inner Circle — Core Memories',
-    subtitle: 'For the childhood & neighbourhood friends who know all my secrets',
-    coverColor: '#E4DAF6',
-    tapeClass: 'tape-lavender',
-    themeName: 'Lavender Pressed Flower',
-    status: 'Open',
-    statusCode: 'active',
-    responseCount: 9,
-    questionCount: 8,
-    lastUpdated: 'Yesterday',
-    shareSlug: 'slamly.app/s/inner-circle-m4p8',
-    sampleResponses: [
-      {
-        friendName: 'Kabir',
-        submittedAt: 'Oct 25',
-        favoriteMemory: 'Summer monsoon cycling races and eating mango ice lollies.',
-        oneWordForMe: 'Chaotic-Good',
-        songDedication: 'Count on Me — Bruno Mars',
-      },
-    ],
-  },
-  {
-    id: 'book-21st-birthday',
-    title: '21st Birthday Time Capsule',
-    subtitle: 'Wishes, predictions for 2030, and polaroid snaps from the party',
-    coverColor: '#D5E8DA',
-    tapeClass: 'tape-sage',
-    themeName: 'Sage Botanical',
-    status: 'Closed',
-    statusCode: 'closed',
-    responseCount: 24,
-    questionCount: 7,
-    lastUpdated: 'Last month',
-    shareSlug: 'slamly.app/s/21st-capsule-q7v1',
-    sampleResponses: [
-      {
-        friendName: 'Diya',
-        submittedAt: 'Sep 14',
-        favoriteMemory: 'Watching you blow out trick candles for 5 minutes straight!',
-        oneWordForMe: 'Iconic',
-        songDedication: '22 — Taylor Swift',
-      },
-    ],
-  },
-  {
-    id: 'book-summer-trip-draft',
-    title: 'Roadtrip & Backpackers Logbook',
-    subtitle: 'Still customising prompts before sharing with the travel group',
-    coverColor: '#FDE0C6',
-    tapeClass: 'tape-peach',
-    themeName: 'Warm Peach Postcard',
-    status: 'Draft',
-    statusCode: 'draft',
-    responseCount: 0,
-    questionCount: 6,
-    lastUpdated: 'Just now',
-    shareSlug: 'Not published yet',
-    sampleResponses: [],
-  },
-];
 
 export const BOOK_TEMPLATES = [
   {
@@ -195,4 +97,3 @@ export const BOOK_TEMPLATES = [
     ],
   },
 ];
-

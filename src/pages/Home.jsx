@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import Button from '../components/Button';
 import {
   FlowerSticker,
@@ -161,6 +162,8 @@ const FEATURES = [
 ];
 
 export default function Home() {
+  const location = useLocation();
+  const [flashMessage, setFlashMessage] = useState(location.state?.flashMessage || '');
   const [activeEntryIdx, setActiveEntryIdx] = useState(0);
   const currentEntry = HERO_SAMPLE_ENTRIES[activeEntryIdx];
 
@@ -174,6 +177,24 @@ export default function Home() {
 
   return (
     <div>
+      {flashMessage && (
+        <div className="container" style={{ paddingTop: '24px' }}>
+          <div className="auth-alert auth-alert--success" role="status" aria-live="polite" style={{ marginBottom: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <span>{flashMessage}</span>
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => setFlashMessage('')}
+                aria-label="Dismiss notification"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ==================== 1. HERO SECTION ==================== */}
       <section className="hero-section" aria-labelledby="hero-heading">
         <div className="container hero-grid">

@@ -48,7 +48,7 @@ export default function Footer() {
 
           <div>
             <h2 className="handwritten" style={{ fontSize: '1.45rem', marginBottom: '8px' }}>
-              Account
+              Account &amp; Legal
             </h2>
             <ul className="footer-links">
               {user ? (
@@ -59,8 +59,8 @@ export default function Footer() {
                     </Link>
                   </li>
                   <li>
-                    <Link to="/create/blank" className="footer-link">
-                      Blank Book Studio
+                    <Link to="/account" className="footer-link">
+                      Account Settings
                     </Link>
                   </li>
                 </>
@@ -83,6 +83,16 @@ export default function Footer() {
                   </li>
                 </>
               )}
+              <li>
+                <Link to="/privacy" className="footer-link">
+                  Privacy Summary
+                </Link>
+              </li>
+              <li>
+                <Link to="/terms" className="footer-link">
+                  Terms of Use
+                </Link>
+              </li>
             </ul>
           </div>
         </div>
@@ -92,7 +102,7 @@ export default function Footer() {
             &copy; {currentYear} Slamly. Crafted with warm paper textures &amp; nostalgia.
           </span>
           <span>
-            Milestone 3 &bull; Secured with Firebase Auth &amp; Cloud Firestore
+            Secured with Firebase Auth, Cloud Firestore &amp; App Check
           </span>
         </div>
       </div>

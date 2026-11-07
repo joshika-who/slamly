@@ -117,9 +117,9 @@ function Signup() {
               <span>Start Your Memory Shelf</span>
             </div>
 
-            <h1 className="auth-showcase__title">
+            <h2 className="auth-showcase__title">
               Your personal corner for every friendship memory.
-            </h1>
+            </h2>
 
             <p className="auth-showcase__subtitle">
               Create themed digital slam books for school farewells, college hostels,
@@ -145,7 +145,7 @@ function Signup() {
                 <span className="auth-perks-list__icon" aria-hidden="true">03</span>
                 <div>
                   <strong>Keep forever or export to PDF</strong>
-                  <p>Read memories anytime or save a printable keepsake book (Milestone 5).</p>
+                  <p>Read memories anytime or save a printable keepsake book.</p>
                 </div>
               </li>
             </ul>
@@ -167,9 +167,9 @@ function Signup() {
 
             <div className="auth-card__header">
               <SlamlyLogoMark size={40} />
-              <h2 id="signup-heading" className="auth-card__title">
+              <h1 id="signup-heading" className="auth-card__title">
                 Create your Slamly account
-              </h2>
+              </h1>
               <p className="auth-card__subtitle">
                 Every friend. Every memory. One little book.
               </p>
@@ -294,6 +294,18 @@ function Signup() {
               </div>
 
               <div className="auth-form__actions">
+                <p className="form-legal-note">
+                  By creating an account, you agree to our{' '}
+                  <Link to="/terms" className="auth-switch-link">
+                    Terms of Use
+                  </Link>{' '}
+                  and{' '}
+                  <Link to="/privacy" className="auth-switch-link">
+                    Privacy Summary
+                  </Link>
+                  .
+                </p>
+
                 <Button
                   type="submit"
                   variant="primary"
