@@ -31,33 +31,47 @@ service cloud.firestore {
         && data.questions.size() <= 50;
     }
 
+    // Helper: validates the optional base64 JPEG photo field on a response document.
+    // If `photo` is omitted, returns true.
+    // If `photo` is present, it must be a string <= 150,000 characters starting with
+    // "data:image/jpeg;base64," (23 characters, checked via range slice to avoid regex overhead).
+    function isValidOptionalPhoto(data) {
+      return !('photo' in data)
+        || (data.photo is string
+            && data.photo.size() > 23
+            && data.photo.size() <= 150000
+            && data.photo[0:23] == 'data:image/jpeg;base64,');
+    }
+
     // Helper: validates a friend response submission on CREATE
     // Note: Firestore Rules cannot loop over dynamic list items, so per-answer character
     // limits (1000 chars) are enforced in the client, with Firestore's 1 MiB document size
     // limit acting as the hard server cap.
     function isValidResponseData(data) {
-      return data.keys().hasOnly(['respondentName', 'answers', 'createdAt'])
+      return data.keys().hasOnly(['respondentName', 'answers', 'createdAt', 'photo'])
         && data.keys().hasAll(['respondentName', 'answers', 'createdAt'])
         && data.respondentName is string
         && data.respondentName.trim().size() >= 1
         && data.respondentName.size() <= 50
         && data.answers is list
         && data.answers.size() <= 50
-        && data.createdAt == request.time;
+        && data.createdAt == request.time
+        && isValidOptionalPhoto(data);
     }
 
     // Helper: validates an owner edit to an existing response on UPDATE
-    // Ensures keys remain strictly respondentName, answers, and createdAt,
-    // and that createdAt is never modified.
+    // Ensures keys remain strictly respondentName, answers, createdAt, and optional photo,
+    // and that createdAt is never modified. Owner can remove `photo` by deleting the field.
     function isValidResponseUpdate(newData, existingData) {
-      return newData.keys().hasOnly(['respondentName', 'answers', 'createdAt'])
+      return newData.keys().hasOnly(['respondentName', 'answers', 'createdAt', 'photo'])
         && newData.keys().hasAll(['respondentName', 'answers', 'createdAt'])
         && newData.createdAt == existingData.createdAt
         && newData.respondentName is string
         && newData.respondentName.trim().size() >= 1
         && newData.respondentName.size() <= 50
         && newData.answers is list
-        && newData.answers.size() <= 50;
+        && newData.answers.size() <= 50
+        && isValidOptionalPhoto(newData);
     }
 
     // Top-level books collection

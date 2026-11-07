@@ -1,6 +1,7 @@
 import { getBookResponses } from './responseService';
 
 export const MAX_EXPORT_RESPONSES = 500;
+export const MAX_PRINT_RESPONSES = 300;
 export const EXPORT_PAGE_BATCH_SIZE = 25;
 
 /**
@@ -182,25 +183,31 @@ export function buildPdfFileName(bookTitle, date = new Date()) {
 }
 
 /**
- * 1. fetchAllResponses(bookId) or fetchAllResponses(userId, bookId)
+ * 1. fetchAllResponses(bookId, options) or fetchAllResponses(userId, bookId, options)
  * Loops through the paginated `getBookResponses` (25 per page) until all responses are loaded,
- * with a safety cap of 500 responses (`MAX_EXPORT_RESPONSES`).
+ * with a configurable safety cap (defaults to 500 for jsPDF, 300 for the Print-Ready Memory Book).
  *
- * Returns an Array of responses with `.responses`, `.capped` (boolean), and `.limit` (500)
+ * Returns an Array of responses with `.responses`, `.capped` (boolean), and `.limit`
  * properties attached so callers can either use the array directly or destructure `{ responses, capped }`.
  */
-export async function fetchAllResponses(arg1, arg2) {
+export async function fetchAllResponses(arg1, arg2, arg3) {
   const hasExplicitUser = typeof arg2 === 'string';
   const userId = hasExplicitUser ? arg1 : undefined;
   const bookId = hasExplicitUser ? arg2 : arg1;
+  const options = (hasExplicitUser ? arg3 : arg2) || {};
+
+  const maxResponses =
+    typeof options.maxResponses === 'number' && options.maxResponses > 0
+      ? options.maxResponses
+      : MAX_EXPORT_RESPONSES;
 
   const collected = [];
   let cursor = null;
   let hasMore = true;
   let capped = false;
 
-  while (hasMore && collected.length < MAX_EXPORT_RESPONSES) {
-    const remainingCapacity = MAX_EXPORT_RESPONSES - collected.length;
+  while (hasMore && collected.length < maxResponses) {
+    const remainingCapacity = maxResponses - collected.length;
     const pageSize = Math.min(EXPORT_PAGE_BATCH_SIZE, remainingCapacity);
 
     const pageResult = hasExplicitUser
@@ -211,7 +218,7 @@ export async function fetchAllResponses(arg1, arg2) {
     cursor = pageResult.nextCursor;
     hasMore = Boolean(pageResult.hasMore && cursor);
 
-    if (collected.length >= MAX_EXPORT_RESPONSES && pageResult.hasMore) {
+    if (collected.length >= maxResponses && pageResult.hasMore) {
       capped = true;
       break;
     }
@@ -229,7 +236,7 @@ export async function fetchAllResponses(arg1, arg2) {
       enumerable: false,
     },
     limit: {
-      value: MAX_EXPORT_RESPONSES,
+      value: maxResponses,
       enumerable: false,
     },
   });

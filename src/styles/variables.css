@@ -38,9 +38,9 @@
   --color-info-bg: #eee8fa;
   --color-info-text: #3d2870;
 
-  /* Typography */
-  --font-heading: 'Patrick Hand', 'Comic Sans MS', cursive;
-  --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Typography (includes system fallbacks for Tamil, Devanagari/Hindi, and Emoji) */
+  --font-heading: 'Patrick Hand', 'Comic Sans MS', 'Nirmala UI', 'Latha', 'Kohinoor Devanagari', 'Noto Sans Tamil', 'Noto Sans Devanagari', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', cursive, sans-serif;
+  --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Nirmala UI', 'Latha', 'InaiMathi', 'Kohinoor Devanagari', 'Mangal', 'Noto Sans Tamil', 'Noto Sans Devanagari', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
 
   /* Layout & Touch Targets */
   --max-width: 1180px;

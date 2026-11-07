@@ -2,6 +2,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getCountFromServer,
   getDocs,
@@ -14,6 +15,11 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/firestore';
 import { auth, isFirebaseConfigured } from '../firebase/firebase';
+import {
+  JPEG_DATA_URL_PREFIX,
+  MAX_CLIENT_PHOTO_DATA_URL_LENGTH,
+  validatePhotoDataUrl,
+} from '../utils/photoCompressor';
 
 const BOOKS_COLLECTION = 'books';
 const RESPONSES_SUBCOLLECTION = 'responses';
@@ -101,6 +107,13 @@ function formatResponseDoc(docSnap) {
       }))
     : [];
 
+  const validPhoto =
+    typeof data.photo === 'string' &&
+    data.photo.startsWith(JPEG_DATA_URL_PREFIX) &&
+    data.photo.length > JPEG_DATA_URL_PREFIX.length
+      ? data.photo
+      : null;
+
   return {
     id: docSnap.id,
     respondentName:
@@ -108,6 +121,7 @@ function formatResponseDoc(docSnap) {
         ? data.respondentName.trim()
         : 'Anonymous Friend',
     answers: normalizedAnswers,
+    photo: validPhoto,
     createdAt: data.createdAt || null,
     createdAtMillis: createdAtDate ? createdAtDate.getTime() : 0,
     formattedDate: createdAtDate
@@ -127,12 +141,14 @@ function formatResponseDoc(docSnap) {
  * Can be called with either:
  *   - `questions` (the book's questions array) + `rawAnswersById` (map of questionId -> string)
  *   - OR a pre-built `answers` array `[{ questionId, question, answer }]`
+ * Also validates the optional `photo` field (must be a JPEG data URL < 120,000 chars when provided).
  */
 export function validateResponsePayload({
   respondentName,
   questions = [],
   rawAnswersById = null,
   answers = null,
+  photo = null,
 }) {
   const cleanedName = typeof respondentName === 'string' ? respondentName.trim() : '';
 
@@ -242,10 +258,19 @@ export function validateResponsePayload({
     throw err;
   }
 
-  return {
+  const validatedPhoto = validatePhotoDataUrl(photo, MAX_CLIENT_PHOTO_DATA_URL_LENGTH);
+
+  const result = {
     respondentName: cleanedName,
     answers: normalizedAnswers,
   };
+
+  // Include `photo` key ONLY when a valid photo data URL was chosen
+  if (validatedPhoto) {
+    result.photo = validatedPhoto;
+  }
+
+  return result;
 }
 
 /**
@@ -254,7 +279,8 @@ export function validateResponsePayload({
  * using an auto-generated ID.
  * - Requires no authentication (friends can respond without an account).
  * - Silently ignores submissions where the hidden honeypot field is filled.
- * - Saves `respondentName`, `answers` ([{ questionId, question, answer }]), and `createdAt` (serverTimestamp).
+ * - Saves `respondentName`, `answers` ([{ questionId, question, answer }]), `createdAt` (serverTimestamp),
+ *   and optional `photo` ("data:image/jpeg;base64,..." ONLY when one was chosen).
  */
 export async function createResponse(bookId, data = {}) {
   if (!isFirebaseConfigured || !db) {
@@ -283,6 +309,11 @@ export async function createResponse(bookId, data = {}) {
       createdAt: serverTimestamp(),
     };
 
+    // Only include `photo` on the Firestore document when one was chosen
+    if (validated.photo) {
+      payload.photo = validated.photo;
+    }
+
     const responsesColRef = collection(
       db,
       BOOKS_COLLECTION,
@@ -295,6 +326,7 @@ export async function createResponse(bookId, data = {}) {
       id: docRef.id,
       respondentName: validated.respondentName,
       answers: validated.answers,
+      ...(validated.photo ? { photo: validated.photo } : {}),
     };
   } catch (error) {
     if (error?.code === 'permission-denied') {
@@ -389,9 +421,42 @@ export async function getResponseCount(arg1, arg2) {
 }
 
 /**
+ * Builds the validated Firestore update payload for an owner response edit.
+ * Preserves existing `photo` by default unless `removePhoto: true` or `photo: null` is passed,
+ * in which case `deleteField()` is used so the `photo` field is removed from the document.
+ */
+export function buildResponseUpdatePayload(changes = {}) {
+  const shouldRemovePhoto = changes.removePhoto === true || changes.photo === null;
+
+  const validated = validateResponsePayload({
+    respondentName: changes.respondentName,
+    answers: changes.answers,
+    photo: !shouldRemovePhoto && typeof changes.photo === 'string' ? changes.photo : null,
+  });
+
+  const updatePayload = {
+    respondentName: validated.respondentName,
+    answers: validated.answers,
+  };
+
+  if (shouldRemovePhoto) {
+    updatePayload.photo = deleteField();
+  } else if (validated.photo) {
+    updatePayload.photo = validated.photo;
+  }
+
+  return {
+    updatePayload,
+    validated,
+    removedPhoto: shouldRemovePhoto,
+  };
+}
+
+/**
  * 4. updateResponse(userId, bookId, responseId, changes)
  *    (Also supports calling as `updateResponse(bookId, responseId, changes)`)
- * Owner-only function: updates `respondentName` and `answers` on an existing response.
+ * Owner-only function: updates `respondentName` and `answers` on an existing response,
+ * and keeps `photo` unless the owner removes it (`removePhoto: true` or `photo: null`).
  * Explicitly prevents modifying `createdAt` or adding any extra keys.
  */
 export async function updateResponse(arg1, arg2, arg3, arg4) {
@@ -422,17 +487,7 @@ export async function updateResponse(arg1, arg2, arg3, arg4) {
   }
 
   try {
-    // Validate respondentName (1–50 chars) and answers (<= 50 items, each <= 1000 chars)
-    const validated = validateResponsePayload({
-      respondentName: changes.respondentName,
-      answers: changes.answers,
-    });
-
-    // Only respondentName and answers can ever be updated; createdAt is preserved untouched
-    const updatePayload = {
-      respondentName: validated.respondentName,
-      answers: validated.answers,
-    };
+    const { updatePayload, validated, removedPhoto } = buildResponseUpdatePayload(changes);
 
     const responseRef = doc(
       db,
@@ -447,6 +502,7 @@ export async function updateResponse(arg1, arg2, arg3, arg4) {
       id: cleanResponseId,
       respondentName: validated.respondentName,
       answers: validated.answers,
+      removedPhoto,
     };
   } catch (error) {
     throw new Error(

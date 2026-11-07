@@ -14,6 +14,7 @@ import TemplateBuilderPreview from './pages/TemplateBuilderPreview';
 import BlankBuilderPreview from './pages/BlankBuilderPreview';
 import EditBook from './pages/EditBook';
 import BookResponses from './pages/BookResponses';
+import PrintBook from './pages/PrintBook';
 import PublicBook from './pages/PublicBook';
 import NotFound from './pages/NotFound';
 
@@ -47,6 +48,11 @@ function App() {
         <Routes>
           {/* Public share link route: minimal layout (logo + form only, no login required) */}
           <Route path="/s/:bookId" element={<PublicBook />} />
+
+          {/* Protected Print-Ready Memory Book route: rendered outside MainLayout (no navbar or footer) */}
+          <Route element={<ProtectedRoute />}>
+            <Route path="/books/:bookId/print" element={<PrintBook />} />
+          </Route>
 
           <Route element={<MainLayout />}>
             {/* Public landing page */}

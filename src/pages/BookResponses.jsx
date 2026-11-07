@@ -96,6 +96,7 @@ function BookResponses() {
   const [editingResponseId, setEditingResponseId] = useState(null);
   const [editName, setEditName] = useState('');
   const [editAnswers, setEditAnswers] = useState([]);
+  const [editRemovePhoto, setEditRemovePhoto] = useState(false);
   const [editError, setEditError] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
@@ -308,6 +309,7 @@ function BookResponses() {
         answer: item.answer,
       }))
     );
+    setEditRemovePhoto(false);
     setEditError('');
     setFlashMessage('');
     setActionError('');
@@ -318,6 +320,7 @@ function BookResponses() {
     setEditingResponseId(null);
     setEditName('');
     setEditAnswers([]);
+    setEditRemovePhoto(false);
     setEditError('');
   };
 
@@ -351,6 +354,7 @@ function BookResponses() {
       const updated = await updateResponse(user.uid, bookId, responseId, {
         respondentName: trimmedName,
         answers: editAnswers,
+        ...(editRemovePhoto ? { removePhoto: true } : {}),
       });
 
       setResponses((prev) =>
@@ -360,12 +364,14 @@ function BookResponses() {
                 ...item,
                 respondentName: updated.respondentName,
                 answers: updated.answers,
+                photo: editRemovePhoto ? null : item.photo,
               }
             : item
         )
       );
 
       setEditingResponseId(null);
+      setEditRemovePhoto(false);
       setFlashMessage(`Saved changes to ${updated.respondentName}’s keepsake page.`);
     } catch (error) {
       setEditError(error.message || 'Could not save changes to this response.');
@@ -574,14 +580,36 @@ function BookResponses() {
               </div>
 
               <div className="responses-pdf-action">
+                {!isLoadingResponses && totalCount > 0 ? (
+                  <Button
+                    to={`/books/${book.id}/print`}
+                    variant="primary"
+                    size="sm"
+                  >
+                    Download memory book (all languages, emoji and photos)
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    disabled
+                    aria-describedby={!isLoadingResponses && totalCount === 0 ? 'pdf-disabled-note' : undefined}
+                  >
+                    Download memory book (all languages, emoji and photos)
+                  </Button>
+                )}
+
                 <Button
-                  variant="primary"
+                  variant="secondary"
                   size="sm"
                   onClick={handleStartPdfExport}
                   disabled={isExportDisabled}
                   aria-describedby={!isLoadingResponses && totalCount === 0 ? 'pdf-disabled-note' : undefined}
                 >
-                  {isExportingPdf ? 'Preparing your memory book...' : 'Download PDF'}
+                  {isExportingPdf
+                    ? 'Preparing quick text-only PDF...'
+                    : 'Quick text-only PDF (English only)'}
                 </Button>
 
                 {isExportingPdf && (
@@ -835,6 +863,63 @@ function BookResponses() {
                           })}
                         </div>
 
+                        {/* Photo Removal Control in Edit Mode (Owner can remove photo, not replace it) */}
+                        {response.photo && (
+                          <div className="response-edit-photo-section">
+                            <span className="form-label" style={{ display: 'block', marginBottom: '8px' }}>
+                              Attached Polaroid Photo
+                            </span>
+
+                            {editRemovePhoto ? (
+                              <div className="response-edit-photo-removed-notice" role="status">
+                                <p style={{ margin: '0 0 8px', fontWeight: 600 }}>
+                                  This photo will be permanently removed when you click &ldquo;Save Changes&rdquo;.
+                                </p>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  disabled={isSavingEdit}
+                                  onClick={() => setEditRemovePhoto(false)}
+                                >
+                                  Undo (Keep photo)
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="response-polaroid-preview-wrap">
+                                <figure className="response-polaroid-frame">
+                                  <div className="response-polaroid-frame__image-box">
+                                    <img
+                                      src={response.photo}
+                                      alt={`Attached photo from ${editName.trim() || response.respondentName}`}
+                                      className="response-polaroid-frame__img"
+                                    />
+                                  </div>
+                                  <figcaption className="response-polaroid-frame__caption">
+                                    {editName.trim() || response.respondentName}
+                                  </figcaption>
+                                </figure>
+
+                                <div className="response-polaroid-preview-actions">
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    className="btn-danger"
+                                    disabled={isSavingEdit}
+                                    onClick={() => setEditRemovePhoto(true)}
+                                  >
+                                    Remove photo
+                                  </Button>
+                                  <span className="form-hint">
+                                    You can remove an unwanted photo, but cannot replace it with a new one.
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <div className="response-keepsake-card__footer">
                           <Button
                             type="button"
@@ -891,6 +976,23 @@ function BookResponses() {
                             </Button>
                           </div>
                         </div>
+
+                        {response.photo && (
+                          <div className="response-keepsake-card__photo-row">
+                            <figure className="response-polaroid-frame">
+                              <div className="response-polaroid-frame__image-box">
+                                <img
+                                  src={response.photo}
+                                  alt={`Keepsake photo shared by ${response.respondentName}`}
+                                  className="response-polaroid-frame__img"
+                                />
+                              </div>
+                              <figcaption className="response-polaroid-frame__caption">
+                                {response.respondentName}
+                              </figcaption>
+                            </figure>
+                          </div>
+                        )}
 
                         <dl className="response-answers-sheet">
                           {response.answers.length === 0 ? (

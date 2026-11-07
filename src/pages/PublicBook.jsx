@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Button from '../components/Button';
 import { getPublicBookById } from '../services/bookService';
@@ -7,6 +7,7 @@ import {
   MAX_ANSWER_LENGTH,
   MAX_RESPONDENT_NAME_LENGTH,
 } from '../services/responseService';
+import { compressPhotoFileToDataUrl } from '../utils/photoCompressor';
 import {
   FlowerSticker,
   HeartSticker,
@@ -71,6 +72,12 @@ function PublicBook() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedName, setSubmittedName] = useState('');
   const [alreadySubmittedNote, setAlreadySubmittedNote] = useState(false);
+
+  // Optional Photo attachment state (Milestone 6B)
+  const [photoDataUrl, setPhotoDataUrl] = useState(null);
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  const photoInputRef = useRef(null);
 
   // Add <meta name="robots" content="noindex"> while viewing the public share page
   useEffect(() => {
@@ -189,9 +196,42 @@ function PublicBook() {
     return errors;
   };
 
+  const handlePhotoFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setPhotoError('');
+    setSubmitError('');
+    setIsProcessingPhoto(true);
+
+    try {
+      const compressed = await compressPhotoFileToDataUrl(file);
+      setPhotoDataUrl(compressed.dataUrl);
+    } catch (error) {
+      setPhotoDataUrl(null);
+      setPhotoError(
+        error.message ||
+          'We could not process that photo. Please pick a smaller JPEG/PNG image or continue without a photo.'
+      );
+      if (photoInputRef.current) {
+        photoInputRef.current.value = '';
+      }
+    } finally {
+      setIsProcessingPhoto(false);
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setPhotoDataUrl(null);
+    setPhotoError('');
+    if (photoInputRef.current) {
+      photoInputRef.current.value = '';
+    }
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (isSubmitting || !book || book.status !== 'published') return;
+    if (isSubmitting || isProcessingPhoto || !book || book.status !== 'published') return;
 
     setSubmitError('');
     const validationErrors = validateClientForm();
@@ -210,6 +250,7 @@ function PublicBook() {
         questions: book.questions,
         rawAnswersById: answersById,
         honeypot,
+        ...(photoDataUrl ? { photo: photoDataUrl } : {}),
       });
 
       const cleanName = respondentName.trim();
@@ -237,6 +278,11 @@ function PublicBook() {
     });
     setRespondentName('');
     setAnswersById(resetAnswers);
+    setPhotoDataUrl(null);
+    setPhotoError('');
+    if (photoInputRef.current) {
+      photoInputRef.current.value = '';
+    }
     setFieldErrors({});
     setSubmitError('');
     setPageState('published');
@@ -706,6 +752,89 @@ function PublicBook() {
                   })}
                 </ol>
 
+                {/* Optional Photo Attachment Control (Milestone 6B) */}
+                <div className="public-question-card public-photo-upload-card">
+                  <div className="public-question-card__header">
+                    <span className="builder-question-number">Polaroid Keepsake</span>
+                    <span className="public-question-badge">Optional</span>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label htmlFor="respondent-photo-input" className="form-label public-question-label">
+                      Add a photo
+                    </label>
+                    <p id="respondent-photo-privacy-note" className="form-hint" style={{ marginBottom: '10px' }}>
+                      Photos are resized and location data is removed.
+                    </p>
+
+                    <div className="public-photo-upload-controls">
+                      <input
+                        ref={photoInputRef}
+                        id="respondent-photo-input"
+                        type="file"
+                        accept="image/*"
+                        className="public-photo-file-input"
+                        disabled={isSubmitting || isProcessingPhoto}
+                        aria-describedby={
+                          photoError
+                            ? 'respondent-photo-privacy-note respondent-photo-error'
+                            : 'respondent-photo-privacy-note'
+                        }
+                        onChange={handlePhotoFileChange}
+                      />
+                    </div>
+
+                    {isProcessingPhoto && (
+                      <p className="form-hint" role="status" aria-live="polite" style={{ marginTop: '8px' }}>
+                        Resizing and preparing your polaroid snapshot...
+                      </p>
+                    )}
+
+                    {photoError && (
+                      <p
+                        id="respondent-photo-error"
+                        className="field-error-text"
+                        role="alert"
+                      >
+                        {photoError}
+                      </p>
+                    )}
+
+                    {photoDataUrl && (
+                      <div className="response-polaroid-preview-wrap">
+                        <figure className="response-polaroid-frame">
+                          <div className="response-polaroid-frame__image-box">
+                            <img
+                              src={photoDataUrl}
+                              alt={
+                                respondentName.trim()
+                                  ? `Selected keepsake photo from ${respondentName.trim()}`
+                                  : 'Selected keepsake photo preview'
+                              }
+                              className="response-polaroid-frame__img"
+                            />
+                          </div>
+                          <figcaption className="response-polaroid-frame__caption">
+                            {respondentName.trim() || 'Your Polaroid Snapshot'}
+                          </figcaption>
+                        </figure>
+
+                        <div className="response-polaroid-preview-actions">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleRemovePhoto}
+                            disabled={isSubmitting || isProcessingPhoto}
+                          >
+                            Remove photo
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {/* Submit Bar */}
                 <div className="public-submit-bar">
                   <p className="form-hint" style={{ margin: 0 }}>
@@ -715,9 +844,13 @@ function PublicBook() {
                     type="submit"
                     variant="primary"
                     size="lg"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isProcessingPhoto}
                   >
-                    {isSubmitting ? 'Sending your page...' : 'Sign & Send My Page'}
+                    {isProcessingPhoto
+                      ? 'Preparing photo...'
+                      : isSubmitting
+                      ? 'Sending your page...'
+                      : 'Sign & Send My Page'}
                   </Button>
                 </div>
               </form>
