@@ -33,7 +33,7 @@ function Privacy() {
             <span className="badge badge--pink">Privacy Summary</span>
             <h1 className="legal-card__title">Privacy on Slamly</h1>
             <p className="legal-card__updated">
-              Last updated: <strong>[LAST UPDATED DATE]</strong>
+              Last updated: <strong>08-11-2026</strong>
             </p>
           </header>
 
@@ -116,7 +116,7 @@ function Privacy() {
                   <strong>Friends who submitted a response:</strong> Because responses are submitted
                   without an account, please contact the owner of the slam book if you want your
                   response or photo edited or removed. If you cannot reach the book owner, email{' '}
-                  <strong>[CONTACT EMAIL]</strong> and let us know which book link and name you used.
+                  <strong>kotagirijoshika@gmail.com</strong> and let us know which book link and name you used.
                 </li>
               </ul>
             </section>
@@ -124,9 +124,9 @@ function Privacy() {
             <section className="legal-section" aria-labelledby="privacy-contact-heading">
               <h2 id="privacy-contact-heading">7. Contact</h2>
               <p>
-                Slamly is operated by <strong>[YOUR NAME]</strong>. If you have questions about this
+                Slamly is operated by <strong>Kotagiri Joshika</strong>. If you have questions about this
                 privacy summary or need help removing content, contact{' '}
-                <strong>[CONTACT EMAIL]</strong>.
+                <strong>kotagirijoshika@gmail.com</strong>.
               </p>
             </section>
           </div>
