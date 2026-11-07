@@ -1,22 +1,23 @@
 import {
-  addDoc,
   collection,
-  deleteDoc,
   doc,
   getDoc,
   getDocs,
   query,
   serverTimestamp,
-  updateDoc,
   where,
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase/firestore';
 import { isFirebaseConfigured } from '../firebase/firebase';
 
-const BOOKS_COLLECTION = 'books';
+export const BOOKS_COLLECTION = 'books';
+export const PUBLIC_BOOKS_COLLECTION = 'publicBooks';
 const RESPONSES_SUBCOLLECTION = 'responses';
 const DELETE_BATCH_SIZE = 400;
+
+export const APP_CHECK_FRIENDLY_MESSAGE =
+  "We couldn't verify this request. Please refresh and try again.";
 
 export const ALLOWED_QUESTION_TYPES = [
   'short_answer',
@@ -99,20 +100,48 @@ export function cloneTemplateQuestions(templateQuestions = []) {
 }
 
 /**
- * Converts Firestore errors into clear, beginner-friendly messages.
+ * Checks whether an error from Firebase/Firestore was caused by an App Check failure.
  */
-export function getFriendlyFirestoreError(error, fallbackMessage = 'Something went wrong while talking to the database.') {
+export function isAppCheckError(error) {
+  if (!error) return false;
+  const code = String(error.code || '').toLowerCase();
+  const message = String(error.message || '').toLowerCase();
+  return (
+    code.includes('appcheck') ||
+    code.includes('app-check') ||
+    message.includes('app check') ||
+    message.includes('appcheck') ||
+    message.includes('recaptcha')
+  );
+}
+
+/**
+ * Converts Firestore errors into clear, beginner-friendly messages.
+ * Handles App Check and permission failures gracefully without exposing raw errors.
+ */
+export function getFriendlyFirestoreError(
+  error,
+  fallbackMessage = 'Something went wrong while talking to the database.'
+) {
   if (!error) return fallbackMessage;
 
-  if (error.isValidationError || error.code === 'book/not-found' || error.code === 'book/unauthorized') {
+  if (
+    error.isValidationError ||
+    error.code === 'book/not-found' ||
+    error.code === 'book/unauthorized'
+  ) {
     return error.message;
+  }
+
+  if (isAppCheckError(error)) {
+    return APP_CHECK_FRIENDLY_MESSAGE;
   }
 
   const code = error.code || '';
 
   switch (code) {
     case 'permission-denied':
-      return 'Permission denied by Cloud Firestore. Make sure you are signed in as the book owner and that the latest firestore.rules have been published in the Firebase Console.';
+      return APP_CHECK_FRIENDLY_MESSAGE;
     case 'not-found':
       return 'The requested slam book could not be found.';
     case 'unavailable':
@@ -335,15 +364,38 @@ function formatPublicBookDoc(docSnap) {
 }
 
 /**
+ * Builds the sanitized payload for `publicBooks/{bookId}`.
+ * Contains ONLY: `title`, `description`, `coverTheme`, `questions`, `status`, and `updatedAt`.
+ * Strictly omits `ownerId`, `templateId`, and `createdAt`.
+ */
+export function buildPublicBookPayload(bookData, updatedAtValue = serverTimestamp()) {
+  const status = bookData.status === 'closed' ? 'closed' : 'published';
+  return {
+    title: bookData.title,
+    description: bookData.description || '',
+    coverTheme: ALLOWED_COVER_THEMES.includes(bookData.coverTheme)
+      ? bookData.coverTheme
+      : 'pink',
+    questions: Array.isArray(bookData.questions) ? bookData.questions : [],
+    status,
+    updatedAt: updatedAtValue,
+  };
+}
+
+/**
  * 1. createBook(userId, bookData)
- * Creates a new slam book document in `books/{bookId}` owned by `userId`.
- * Uses `addDoc()` so Firestore always generates a non-guessable, non-sequential random ID.
+ * Creates a new slam book document in `books/{bookId}` owned by `userId` using a Firestore auto-generated ID.
+ * Uses a `writeBatch` so if the book is created as "published" or "closed", its sanitized public copy
+ * in `publicBooks/{bookId}` is written atomically in the same batch.
  */
 export async function createBook(userId, bookData) {
   assertFirestoreAndUser(userId);
 
   try {
     const validated = validateBookFields(bookData, { partial: false });
+
+    const bookRef = doc(collection(db, BOOKS_COLLECTION));
+    const batch = writeBatch(db);
 
     const payload = {
       ownerId: userId,
@@ -357,9 +409,17 @@ export async function createBook(userId, bookData) {
       updatedAt: serverTimestamp(),
     };
 
-    const docRef = await addDoc(collection(db, BOOKS_COLLECTION), payload);
+    batch.set(bookRef, payload);
+
+    if (validated.status === 'published' || validated.status === 'closed') {
+      const publicBookRef = doc(db, PUBLIC_BOOKS_COLLECTION, bookRef.id);
+      batch.set(publicBookRef, buildPublicBookPayload(validated));
+    }
+
+    await batch.commit();
+
     return {
-      id: docRef.id,
+      id: bookRef.id,
       ...payload,
     };
   } catch (error) {
@@ -393,7 +453,7 @@ export async function getUserBooks(userId) {
 
 /**
  * 3. getBookById(userId, bookId)
- * Fetches a single slam book and verifies that it belongs to `userId`.
+ * Fetches a single slam book from `books/{bookId}` and verifies that it belongs to `userId`.
  */
 export async function getBookById(userId, bookId) {
   assertFirestoreAndUser(userId);
@@ -436,11 +496,12 @@ export async function getBookById(userId, bookId) {
 
 /**
  * 4. getPublicBookById(bookId)
- * Loads a single slam book for the public share page (/s/:bookId) using a single `getDoc()` call.
+ * Loads a single slam book for the public share page (/s/:bookId) from `publicBooks/{bookId}`
+ * using a single `getDoc()` call.
+ * - Never reads the private `books/{bookId}` document and never exposes `ownerId`.
  * - Never performs a list query.
  * - Requires no authentication.
- * - Treats missing books, draft books, and permission-denied responses identically as "Book not found".
- * - Never returns `ownerId`.
+ * - Treats missing books and draft books identically as "Book not found".
  */
 export async function getPublicBookById(bookId) {
   assertFirestoreInitialized();
@@ -453,8 +514,8 @@ export async function getPublicBookById(bookId) {
   }
 
   try {
-    const bookRef = doc(db, BOOKS_COLLECTION, cleanBookId);
-    const docSnap = await getDoc(bookRef);
+    const publicBookRef = doc(db, PUBLIC_BOOKS_COLLECTION, cleanBookId);
+    const docSnap = await getDoc(publicBookRef);
 
     if (!docSnap.exists()) {
       const notFoundErr = new Error('This slam book could not be found or is still a private draft.');
@@ -464,7 +525,6 @@ export async function getPublicBookById(bookId) {
 
     const publicBook = formatPublicBookDoc(docSnap);
 
-    // Even if the owner views /s/:bookId while signed in, a draft book has no public access
     if (publicBook.status === 'draft') {
       const draftErr = new Error('This slam book could not be found or is still a private draft.');
       draftErr.code = 'book/not-found';
@@ -473,7 +533,10 @@ export async function getPublicBookById(bookId) {
 
     return publicBook;
   } catch (error) {
-    // Firestore denies `get` for logged-out visitors when a book does not exist or is a draft
+    if (isAppCheckError(error)) {
+      throw new Error(APP_CHECK_FRIENDLY_MESSAGE);
+    }
+    // Missing or draft books do not exist in publicBooks (or return permission-denied)
     if (error.code === 'book/not-found' || error.code === 'permission-denied') {
       const notFoundErr = new Error(
         'This slam book could not be found. It may still be a private draft or the link may be incorrect.'
@@ -487,10 +550,11 @@ export async function getPublicBookById(bookId) {
 
 /**
  * 5. updateBook(userId, bookId, changes)
- * Updates an existing book owned by `userId`.
+ * Updates an existing book owned by `userId` and keeps `publicBooks/{bookId}` in sync
+ * atomically using a Firestore `writeBatch`:
+ * - When status is "published" or "closed", sets `publicBooks/{bookId}` with the sanitized public fields.
+ * - When status is "draft", deletes `publicBooks/{bookId}` so the public copy no longer exists.
  * Explicitly prevents modifying `ownerId` or `createdAt`, and sets `updatedAt`.
- * When called with `{ status }` only (e.g. publishing, closing, or moving to draft),
- * preserves all other existing book fields unchanged.
  */
 export async function updateBook(userId, bookId, changes = {}) {
   assertFirestoreAndUser(userId);
@@ -528,7 +592,18 @@ export async function updateBook(userId, bookId, changes = {}) {
     };
 
     const bookRef = doc(db, BOOKS_COLLECTION, bookId);
-    await updateDoc(bookRef, updatePayload);
+    const publicBookRef = doc(db, PUBLIC_BOOKS_COLLECTION, bookId);
+    const batch = writeBatch(db);
+
+    batch.update(bookRef, updatePayload);
+
+    if (validated.status === 'published' || validated.status === 'closed') {
+      batch.set(publicBookRef, buildPublicBookPayload(validated));
+    } else {
+      batch.delete(publicBookRef);
+    }
+
+    await batch.commit();
 
     return {
       ...existingBook,
@@ -540,9 +615,25 @@ export async function updateBook(userId, bookId, changes = {}) {
 }
 
 /**
+ * Status-change helpers that delegate to `updateBook` so `books/{bookId}` and
+ * `publicBooks/{bookId}` are always updated together in a single `writeBatch`.
+ */
+export async function publishBook(userId, bookId) {
+  return updateBook(userId, bookId, { status: 'published' });
+}
+
+export async function closeBook(userId, bookId) {
+  return updateBook(userId, bookId, { status: 'closed' });
+}
+
+export async function moveBookToDraft(userId, bookId) {
+  return updateBook(userId, bookId, { status: 'draft' });
+}
+
+/**
  * 6. deleteBook(userId, bookId)
  * Verifies ownership, deletes all documents in `books/{bookId}/responses` in batches of up to 400,
- * and then permanently deletes the slam book document itself.
+ * and then atomically deletes both `publicBooks/{bookId}` and `books/{bookId}` in a single `writeBatch`.
  */
 export async function deleteBook(userId, bookId) {
   assertFirestoreAndUser(userId);
@@ -568,11 +659,85 @@ export async function deleteBook(userId, bookId) {
       }
     }
 
-    // Step 2: Delete the parent book document
+    // Step 2: Delete both the public copy (`publicBooks/{bookId}`) and the private book (`books/{bookId}`)
+    // in a single atomic batch.
     const bookRef = doc(db, BOOKS_COLLECTION, bookId);
-    await deleteDoc(bookRef);
+    const publicBookRef = doc(db, PUBLIC_BOOKS_COLLECTION, bookId);
+    const finalBatch = writeBatch(db);
+    finalBatch.delete(publicBookRef);
+    finalBatch.delete(bookRef);
+    await finalBatch.commit();
+
     return true;
   } catch (error) {
     throw new Error(getFriendlyFirestoreError(error, 'Could not delete this slam book and its responses.'));
+  }
+}
+
+/**
+ * 7. syncPublicBooksForOwner(userId, existingBooks = null)
+ * Idempotent migration helper that ensures every "published" or "closed" book owned by `userId`
+ * has a matching sanitized document in `publicBooks/{bookId}` (and removes any stray public copy
+ * for a "draft" book).
+ * - Creates only missing `publicBooks/{bookId}` documents.
+ * - Never throws: any error is logged quietly so it can never break the owner's dashboard.
+ */
+export async function syncPublicBooksForOwner(userId, existingBooks = null) {
+  if (!isFirebaseConfigured || !db || !userId || typeof userId !== 'string') {
+    return { syncedCount: 0, skipped: true };
+  }
+
+  try {
+    const ownerBooks = Array.isArray(existingBooks)
+      ? existingBooks
+      : await getUserBooks(userId);
+
+    const activeBooks = ownerBooks.filter(
+      (b) => b && b.id && (b.status === 'published' || b.status === 'closed')
+    );
+
+    if (activeBooks.length === 0) {
+      return { syncedCount: 0, skipped: false };
+    }
+
+    const missingBooks = [];
+
+    for (const book of activeBooks) {
+      const publicRef = doc(db, PUBLIC_BOOKS_COLLECTION, book.id);
+      const publicSnap = await getDoc(publicRef);
+      if (!publicSnap.exists()) {
+        missingBooks.push(book);
+      }
+    }
+
+    if (missingBooks.length === 0) {
+      return { syncedCount: 0, skipped: false };
+    }
+
+    const batch = writeBatch(db);
+    missingBooks.forEach((book) => {
+      const validated = validateBookFields(
+        {
+          title: book.title,
+          description: book.description,
+          coverTheme: book.coverTheme,
+          status: book.status,
+          templateId: book.templateId,
+          questions: book.questions,
+        },
+        { partial: false }
+      );
+      const publicRef = doc(db, PUBLIC_BOOKS_COLLECTION, book.id);
+      batch.set(publicRef, buildPublicBookPayload(validated));
+    });
+
+    await batch.commit();
+    return { syncedCount: missingBooks.length, skipped: false };
+  } catch (error) {
+    console.warn(
+      '[Slamly Public Book Sync] Could not sync public book copies in background:',
+      error?.message || error
+    );
+    return { syncedCount: 0, skipped: true };
   }
 }

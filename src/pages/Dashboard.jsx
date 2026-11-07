@@ -1,9 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Button from '../components/Button';
 import BookCard from '../components/BookCard';
 import { useAuth } from '../context/AuthContext';
-import { deleteBook, getUserBooks, updateBook } from '../services/bookService';
+import {
+  deleteBook,
+  getUserBooks,
+  syncPublicBooksForOwner,
+  updateBook,
+} from '../services/bookService';
 import { getResponseCount } from '../services/responseService';
 import {
   FlowerSticker,
@@ -52,6 +57,7 @@ function Dashboard() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const hasSyncedPublicBooksRef = useRef(false);
 
   const loadBooks = useCallback(async () => {
     if (!user?.uid) return;
@@ -61,6 +67,13 @@ function Dashboard() {
     try {
       const userBooks = await getUserBooks(user.uid);
       setBooks(userBooks);
+
+      // Run idempotent publicBooks backfill once when the owner's dashboard loads.
+      // Any failure is caught and logged quietly inside syncPublicBooksForOwner.
+      if (!hasSyncedPublicBooksRef.current) {
+        hasSyncedPublicBooksRef.current = true;
+        syncPublicBooksForOwner(user.uid, userBooks).catch(() => {});
+      }
 
       // Initialize loading state for each book's response count
       const initialLoadingMap = {};

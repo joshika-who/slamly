@@ -51,7 +51,8 @@ function saveAlreadySubmittedNote(bookId) {
  * Minimal, public-facing slam book page where friends can fill out and submit a response
  * without needing an account:
  * - Injects `<meta name="robots" content="noindex">` so search engines do not index share links.
- * - Loads the book with a single `getDoc()` call via `getPublicBookById(bookId)`.
+ * - Loads the sanitized public book copy from `publicBooks/{bookId}` with a single `getDoc()` call
+ *   via `getPublicBookById(bookId)` (which never contains `ownerId`, `templateId`, or `createdAt`).
  * - Never displays or accesses `ownerId`.
  * - Handles 4 states: Loading, "Book not found" (missing or draft),
  *   "No longer accepting responses" (closed), and the Response Form (published) + Thank-You screen.

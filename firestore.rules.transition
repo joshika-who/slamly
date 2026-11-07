@@ -1,0 +1,180 @@
+rules_version = '2';
+
+// ============================================================================
+// SLAMLY — PHASE 1 TRANSITION RULES (firestore.rules.transition)
+// Publish this file FIRST in Firebase Console -> Firestore Database -> Rules,
+// BEFORE deploying the Milestone 7 code to Vercel.
+//
+// Why Phase 1 exists:
+// - Keeps existing public links working while the old frontend is still cached
+//   or before the owner opens their dashboard to backfill `publicBooks/{bookId}`.
+// - Adds full rules for `/publicBooks/{bookId}` so the new code can create,
+//   update, sync, and read sanitized public book copies.
+// - Allows friend response creation if the book is "published" in EITHER
+//   `publicBooks/{bookId}` OR `books/{bookId}`.
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: checks if the requester is signed in via Firebase Authentication
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper: checks if the signed-in user owns the private book BEFORE the write/batch
+    // (Used for read/delete/response checks, and for deleting `publicBooks/{bookId}` in
+    // the same writeBatch that deletes `books/{bookId}`).
+    function isBookOwner(bookId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/books/$(bookId))
+        && get(/databases/$(database)/documents/books/$(bookId)).data.ownerId == request.auth.uid;
+    }
+
+    // Helper: checks if the signed-in user owns the private book AFTER the write/batch
+    // (Used when `books/{bookId}` and `publicBooks/{bookId}` are created or updated
+    // together in the same atomic `writeBatch`, where `get()` would see stale/missing data).
+    function isBookOwnerAfter(bookId) {
+      return isSignedIn()
+        && existsAfter(/databases/$(database)/documents/books/$(bookId))
+        && getAfter(/databases/$(database)/documents/books/$(bookId)).data.ownerId == request.auth.uid;
+    }
+
+    // Helper: validates private book document fields on create and update
+    function isValidBookData(data) {
+      return data.title is string
+        && data.title.trim().size() >= 1
+        && data.title.size() <= 100
+        && data.description is string
+        && data.description.size() <= 500
+        && data.coverTheme is string
+        && data.coverTheme in ['pink', 'lavender', 'peach', 'sage']
+        && data.status is string
+        && data.status in ['draft', 'published', 'closed']
+        && (data.templateId == null || data.templateId is string)
+        && data.questions is list
+        && data.questions.size() <= 50;
+    }
+
+    // Helper: validates sanitized public book copy (`publicBooks/{bookId}`)
+    // Strictly forbids `ownerId`, `templateId`, and `createdAt` via `hasOnly`.
+    function isValidPublicBookData(data) {
+      return data.keys().hasOnly(['title', 'description', 'coverTheme', 'questions', 'status', 'updatedAt'])
+        && data.keys().hasAll(['title', 'description', 'coverTheme', 'questions', 'status', 'updatedAt'])
+        && data.title is string
+        && data.title.trim().size() >= 1
+        && data.title.size() <= 100
+        && data.description is string
+        && data.description.size() <= 500
+        && data.coverTheme is string
+        && data.coverTheme in ['pink', 'lavender', 'peach', 'sage']
+        && data.status is string
+        && data.status in ['published', 'closed']
+        && data.questions is list
+        && data.questions.size() <= 50
+        && data.updatedAt is timestamp;
+    }
+
+    // Helper: validates the optional base64 JPEG photo field on a response document.
+    function isValidOptionalPhoto(data) {
+      return !('photo' in data)
+        || (data.photo is string
+            && data.photo.size() > 23
+            && data.photo.size() <= 150000
+            && data.photo[0:23] == 'data:image/jpeg;base64,');
+    }
+
+    // Helper: validates a friend response submission on CREATE
+    function isValidResponseData(data) {
+      return data.keys().hasOnly(['respondentName', 'answers', 'createdAt', 'photo'])
+        && data.keys().hasAll(['respondentName', 'answers', 'createdAt'])
+        && data.respondentName is string
+        && data.respondentName.trim().size() >= 1
+        && data.respondentName.size() <= 50
+        && data.answers is list
+        && data.answers.size() <= 50
+        && data.createdAt == request.time
+        && isValidOptionalPhoto(data);
+    }
+
+    // Helper: validates an owner edit to an existing response on UPDATE
+    function isValidResponseUpdate(newData, existingData) {
+      return newData.keys().hasOnly(['respondentName', 'answers', 'createdAt', 'photo'])
+        && newData.keys().hasAll(['respondentName', 'answers', 'createdAt'])
+        && newData.createdAt == existingData.createdAt
+        && newData.respondentName is string
+        && newData.respondentName.trim().size() >= 1
+        && newData.respondentName.size() <= 50
+        && newData.answers is list
+        && newData.answers.size() <= 50
+        && isValidOptionalPhoto(newData);
+    }
+
+    // Helper: during Phase 1 transition, accepts a parent book that is published
+    // in EITHER `publicBooks/{bookId}` OR `books/{bookId}`.
+    function isParentBookPublishedForTransition(bookId) {
+      return (exists(/databases/$(database)/documents/publicBooks/$(bookId))
+          && get(/databases/$(database)/documents/publicBooks/$(bookId)).data.status == 'published')
+        || (exists(/databases/$(database)/documents/books/$(bookId))
+          && get(/databases/$(database)/documents/books/$(bookId)).data.status == 'published');
+    }
+
+    // Sanitized public book copies (NO ownerId, templateId, or createdAt)
+    match /publicBooks/{bookId} {
+      // Single-document read (get): allowed for anyone when status is published or closed
+      allow get: if resource.data.status in ['published', 'closed'];
+
+      // Collection queries (list): never allowed so public books cannot be enumerated
+      allow list: if false;
+
+      // Create & Update: allowed ONLY for the signed-in owner of the matching private book.
+      // Uses `isBookOwnerAfter` (`getAfter`) so atomic `writeBatch` calls that create/update
+      // `books/{bookId}` and `publicBooks/{bookId}` together succeed.
+      allow create, update: if isBookOwnerAfter(bookId)
+        && isValidPublicBookData(request.resource.data);
+
+      // Delete: allowed ONLY for the signed-in owner of the matching private book.
+      // Uses `isBookOwner` (`get`) so deleting both documents in the same `writeBatch` succeeds.
+      allow delete: if isBookOwner(bookId);
+    }
+
+    // Private books collection (Transition: keeps public `get` for published/closed temporarily)
+    match /books/{bookId} {
+      allow get: if (isSignedIn() && resource.data.ownerId == request.auth.uid)
+        || resource.data.status in ['published', 'closed'];
+
+      allow list: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && isValidBookData(request.resource.data);
+
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && isValidBookData(request.resource.data);
+
+      allow delete: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid;
+
+      // Subcollection: friend responses for a specific slam book
+      match /responses/{responseId} {
+        allow create: if isParentBookPublishedForTransition(bookId)
+          && isValidResponseData(request.resource.data);
+
+        allow read, delete: if isBookOwner(bookId);
+
+        allow update: if isBookOwner(bookId)
+          && isValidResponseUpdate(request.resource.data, resource.data);
+      }
+    }
+
+    // Default deny for everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

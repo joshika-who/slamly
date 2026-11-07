@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/firestore';
 import { auth, isFirebaseConfigured } from '../firebase/firebase';
+import { APP_CHECK_FRIENDLY_MESSAGE, isAppCheckError } from './bookService';
 import {
   JPEG_DATA_URL_PREFIX,
   MAX_CLIENT_PHOTO_DATA_URL_LENGTH,
@@ -31,6 +32,7 @@ export const DEFAULT_RESPONSE_PAGE_SIZE = 25;
 
 /**
  * Converts Firestore errors into friendly messages for friends and book owners.
+ * Handles App Check and permission failures gracefully without exposing raw errors.
  */
 export function getFriendlyResponseError(
   error,
@@ -42,11 +44,15 @@ export function getFriendlyResponseError(
     return error.message;
   }
 
+  if (isAppCheckError(error)) {
+    return APP_CHECK_FRIENDLY_MESSAGE;
+  }
+
   const code = error.code || '';
 
   switch (code) {
     case 'permission-denied':
-      return 'Permission denied by Cloud Firestore. Make sure you are signed in as the book owner (or that the book is published) and that the latest firestore.rules are published.';
+      return APP_CHECK_FRIENDLY_MESSAGE;
     case 'not-found':
       return 'The requested response could not be found.';
     case 'unavailable':
@@ -329,8 +335,11 @@ export async function createResponse(bookId, data = {}) {
       ...(validated.photo ? { photo: validated.photo } : {}),
     };
   } catch (error) {
+    if (isAppCheckError(error)) {
+      throw new Error(APP_CHECK_FRIENDLY_MESSAGE);
+    }
     if (error?.code === 'permission-denied') {
-      throw new Error('This slam book is no longer accepting responses, or the link is no longer active.');
+      throw new Error(APP_CHECK_FRIENDLY_MESSAGE);
     }
     throw new Error(
       getFriendlyResponseError(error, 'Could not send your response right now. Please try again.')

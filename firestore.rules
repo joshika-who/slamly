@@ -1,5 +1,19 @@
 rules_version = '2';
 
+// ============================================================================
+// SLAMLY — PHASE 2 FINAL RULES (firestore.rules)
+// Publish this file LAST in Firebase Console -> Firestore Database -> Rules,
+// AFTER the Milestone 7 code is live and `publicBooks/{bookId}` copies exist.
+//
+// Key security guarantees in Final Rules:
+// - `/books/{bookId}` is 100% owner-only (`get`, `list`, `create`, `update`, `delete`).
+//   No public visitor can ever read `books/{bookId}` or see `ownerId`.
+// - `/publicBooks/{bookId}` allows public single-document `get` (no `list`),
+//   and strictly forbids `ownerId`, `templateId`, and `createdAt`.
+// - `/books/{bookId}/responses/{responseId}` allows public `create` ONLY when
+//   `publicBooks/{bookId}.status == 'published'` and payload validation passes.
+// ============================================================================
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -8,14 +22,25 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Helper: checks if the signed-in user owns the parent book document
+    // Helper: checks if the signed-in user owns the private book BEFORE the write/batch
+    // (Used for read/delete/response checks, and for deleting `publicBooks/{bookId}` in
+    // the same writeBatch that deletes `books/{bookId}`).
     function isBookOwner(bookId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/books/$(bookId))
         && get(/databases/$(database)/documents/books/$(bookId)).data.ownerId == request.auth.uid;
     }
 
-    // Helper: validates book document fields on create and update
+    // Helper: checks if the signed-in user owns the private book AFTER the write/batch
+    // (Used when `books/{bookId}` and `publicBooks/{bookId}` are created or updated
+    // together in the same atomic `writeBatch`, where `get()` would see stale/missing data).
+    function isBookOwnerAfter(bookId) {
+      return isSignedIn()
+        && existsAfter(/databases/$(database)/documents/books/$(bookId))
+        && getAfter(/databases/$(database)/documents/books/$(bookId)).data.ownerId == request.auth.uid;
+    }
+
+    // Helper: validates private book document fields on create and update
     function isValidBookData(data) {
       return data.title is string
         && data.title.trim().size() >= 1
@@ -31,10 +56,26 @@ service cloud.firestore {
         && data.questions.size() <= 50;
     }
 
+    // Helper: validates sanitized public book copy (`publicBooks/{bookId}`)
+    // Strictly forbids `ownerId`, `templateId`, and `createdAt` via `hasOnly`.
+    function isValidPublicBookData(data) {
+      return data.keys().hasOnly(['title', 'description', 'coverTheme', 'questions', 'status', 'updatedAt'])
+        && data.keys().hasAll(['title', 'description', 'coverTheme', 'questions', 'status', 'updatedAt'])
+        && data.title is string
+        && data.title.trim().size() >= 1
+        && data.title.size() <= 100
+        && data.description is string
+        && data.description.size() <= 500
+        && data.coverTheme is string
+        && data.coverTheme in ['pink', 'lavender', 'peach', 'sage']
+        && data.status is string
+        && data.status in ['published', 'closed']
+        && data.questions is list
+        && data.questions.size() <= 50
+        && data.updatedAt is timestamp;
+    }
+
     // Helper: validates the optional base64 JPEG photo field on a response document.
-    // If `photo` is omitted, returns true.
-    // If `photo` is present, it must be a string <= 150,000 characters starting with
-    // "data:image/jpeg;base64," (23 characters, checked via range slice to avoid regex overhead).
     function isValidOptionalPhoto(data) {
       return !('photo' in data)
         || (data.photo is string
@@ -44,9 +85,6 @@ service cloud.firestore {
     }
 
     // Helper: validates a friend response submission on CREATE
-    // Note: Firestore Rules cannot loop over dynamic list items, so per-answer character
-    // limits (1000 chars) are enforced in the client, with Firestore's 1 MiB document size
-    // limit acting as the hard server cap.
     function isValidResponseData(data) {
       return data.keys().hasOnly(['respondentName', 'answers', 'createdAt', 'photo'])
         && data.keys().hasAll(['respondentName', 'answers', 'createdAt'])
@@ -60,8 +98,6 @@ service cloud.firestore {
     }
 
     // Helper: validates an owner edit to an existing response on UPDATE
-    // Ensures keys remain strictly respondentName, answers, createdAt, and optional photo,
-    // and that createdAt is never modified. Owner can remove `photo` by deleting the field.
     function isValidResponseUpdate(newData, existingData) {
       return newData.keys().hasOnly(['respondentName', 'answers', 'createdAt', 'photo'])
         && newData.keys().hasAll(['respondentName', 'answers', 'createdAt'])
@@ -74,45 +110,53 @@ service cloud.firestore {
         && isValidOptionalPhoto(newData);
     }
 
-    // Top-level books collection
-    match /books/{bookId} {
-      // Single-document read (get): allowed for the book owner OR anyone if the book is "published" or "closed"
-      allow get: if (isSignedIn() && resource.data.ownerId == request.auth.uid)
-        || resource.data.status in ['published', 'closed'];
+    // Sanitized public book copies (NO ownerId, templateId, or createdAt)
+    match /publicBooks/{bookId} {
+      // Single-document read (get): allowed for anyone when status is published or closed
+      allow get: if resource.data.status in ['published', 'closed'];
 
-      // Collection queries (list): ONLY allowed for the authenticated owner of those books.
-      // Public list queries are never allowed so published books cannot be browsed or enumerated.
-      allow list: if isSignedIn()
+      // Collection queries (list): never allowed so public books cannot be enumerated
+      allow list: if false;
+
+      // Create & Update: allowed ONLY for the signed-in owner of the matching private book.
+      // Uses `isBookOwnerAfter` (`getAfter`) so atomic `writeBatch` calls that create/update
+      // `books/{bookId}` and `publicBooks/{bookId}` together succeed.
+      allow create, update: if isBookOwnerAfter(bookId)
+        && isValidPublicBookData(request.resource.data);
+
+      // Delete: allowed ONLY for the signed-in owner of the matching private book.
+      // Uses `isBookOwner` (`get`) so deleting both documents in the same `writeBatch` succeeds.
+      allow delete: if isBookOwner(bookId);
+    }
+
+    // Private books collection: 100% owner-only (no public access at all)
+    match /books/{bookId} {
+      allow get, list: if isSignedIn()
         && resource.data.ownerId == request.auth.uid;
 
-      // Create: user must be signed in, set ownerId to their own UID, and pass validation
       allow create: if isSignedIn()
         && request.resource.data.ownerId == request.auth.uid
         && isValidBookData(request.resource.data);
 
-      // Update: only the owner can update, ownerId & createdAt must never change, and fields must be valid
       allow update: if isSignedIn()
         && resource.data.ownerId == request.auth.uid
         && request.resource.data.ownerId == resource.data.ownerId
         && request.resource.data.createdAt == resource.data.createdAt
         && isValidBookData(request.resource.data);
 
-      // Delete: only the owner can delete their own book
       allow delete: if isSignedIn()
         && resource.data.ownerId == request.auth.uid;
 
       // Subcollection: friend responses for a specific slam book
       match /responses/{responseId} {
-        // Create: allowed for anyone (signed in or not) ONLY if the parent book exists
-        // and its status is currently "published", and the response payload is valid.
-        allow create: if exists(/databases/$(database)/documents/books/$(bookId))
-          && get(/databases/$(database)/documents/books/$(bookId)).data.status == 'published'
+        // Create: allowed ONLY if `publicBooks/{bookId}` exists and has status == "published"
+        allow create: if exists(/databases/$(database)/documents/publicBooks/$(bookId))
+          && get(/databases/$(database)/documents/publicBooks/$(bookId)).data.status == 'published'
           && isValidResponseData(request.resource.data);
 
-        // Read & Delete: restricted strictly to the parent book's owner
+        // Read, Update, Delete: strictly restricted to the parent book's owner
         allow read, delete: if isBookOwner(bookId);
 
-        // Update: allowed ONLY for the parent book's owner, preserving createdAt and valid fields
         allow update: if isBookOwner(bookId)
           && isValidResponseUpdate(request.resource.data, resource.data);
       }
