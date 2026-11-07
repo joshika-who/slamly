@@ -1822,3 +1822,105 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ==========================================================================
+   14. MILESTONE 2: FIREBASE AUTH ALERTS & SESSION LOADING SCREEN
+   ========================================================================== */
+
+.auth-alert {
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--color-ink);
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin-bottom: 20px;
+  line-height: 1.45;
+}
+
+.auth-alert--error {
+  background-color: var(--color-error-bg);
+  color: var(--color-error-text);
+  border-color: var(--color-error-border);
+}
+
+.auth-alert--success {
+  background-color: var(--color-success-bg);
+  color: var(--color-success-text);
+  border-color: var(--pastel-sage-strong);
+}
+
+.auth-loading-page {
+  padding: 72px 0 96px;
+}
+
+.auth-loading-card {
+  max-width: 480px;
+  margin: 0 auto;
+  text-align: center;
+  padding: 44px 28px;
+}
+
+.auth-loading-card__icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.auth-loading-card__spinner {
+  display: inline-flex;
+  justify-content: center;
+  margin-bottom: 12px;
+  animation: sticker-spin 2.4s linear infinite;
+}
+
+.auth-loading-card__title {
+  font-size: 1.85rem;
+  margin-bottom: 8px;
+}
+
+.auth-loading-card__subtitle {
+  color: var(--color-ink-muted);
+  font-size: 0.95rem;
+}
+
+@keyframes sticker-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+/* ==========================================================================
+   15. MILESTONE 3: BUILDER COMPACT SELECTS & DELETE BUTTON VARIANTS
+   ========================================================================== */
+
+.form-input--compact {
+  width: auto;
+  min-width: 170px;
+  padding: 6px 12px;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.btn-danger {
+  background-color: var(--color-error-bg);
+  color: var(--color-error-text);
+  border-color: var(--color-ink);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: #f9d2da;
+}
+
+.btn-danger-ghost {
+  color: var(--color-error-text);
+}
+
+.btn-danger-ghost:hover:not(:disabled) {
+  background-color: var(--color-error-bg);
+  color: var(--color-error-text);
+}

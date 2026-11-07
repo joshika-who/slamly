@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Button from '../components/Button';
+import { useAuth } from '../context/AuthContext';
+import {
+  createBook,
+  createQuestionId,
+} from '../services/bookService';
 import {
   FlowerSticker,
   HeartSticker,
@@ -17,62 +22,114 @@ const COVER_THEMES = [
 const QUESTION_TYPES = [
   { id: 'short_answer', label: 'Short Answer' },
   { id: 'paragraph', label: 'Long Story / Paragraph' },
+  { id: 'date', label: 'Date / Memory Date' },
+  { id: 'multiple_choice', label: 'Multiple Choice' },
   { id: 'polaroid_prompt', label: 'Memory / Vibe Check' },
 ];
 
 /**
  * BlankBuilderPreview Page (/create/blank)
- * Milestone 1 interactive preview screen for building a slam book from scratch.
- * Allows naming the book, choosing a cover colour, and adding custom questions.
+ * Connects blank slam book creation to Cloud Firestore in Milestone 3:
+ * - Validates title, description, coverTheme, status, and questions.
+ * - Saves the new book to `books/{bookId}` with `templateId: null` via `createBook()`.
+ * - Redirects to `/dashboard` after saving.
  */
 function BlankBuilderPreview() {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [bookTitle, setBookTitle] = useState('My Custom Friendship Book');
   const [bookDescription, setBookDescription] = useState(
     'Leave a page of memories, inside jokes, and honest confessions for me to keep!'
   );
   const [coverTheme, setCoverTheme] = useState('peach');
-  const [questions, setQuestions] = useState([
+  const [bookStatus, setBookStatus] = useState('published');
+  const [questions, setQuestions] = useState(() => [
     {
-      id: 'blank-q-1',
-      prompt: 'What is your name and how did we first meet?',
+      id: createQuestionId(),
+      text: 'What is your name and how did we first meet?',
       type: 'short_answer',
+      order: 0,
+      required: true,
     },
     {
-      id: 'blank-q-2',
-      prompt: 'What is a memory of us that always makes you laugh?',
+      id: createQuestionId(),
+      text: 'What is a memory of us that always makes you laugh?',
       type: 'paragraph',
+      order: 1,
+      required: true,
     },
     {
-      id: 'blank-q-3',
-      prompt: 'Write a message for me to open five years from today:',
+      id: createQuestionId(),
+      text: 'Write a message for me to open five years from today:',
       type: 'paragraph',
+      order: 2,
+      required: false,
     },
   ]);
 
   const [newPrompt, setNewPrompt] = useState('');
   const [newType, setNewType] = useState('short_answer');
-  const [previewSavedBanner, setPreviewSavedBanner] = useState(false);
+  const [newOptionsText, setNewOptionsText] = useState('Option 1, Option 2');
+
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  // Warn before closing or refreshing the browser tab when unsaved changes exist
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      if (isDirty && !isSaving) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty, isSaving]);
 
   const handleAddQuestion = (event) => {
     event.preventDefault();
+    setErrorMessage('');
     const trimmed = newPrompt.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      setErrorMessage('Please enter a question prompt before clicking Add Question.');
+      return;
+    }
 
-    setQuestions((prev) => [
-      ...prev,
-      {
-        id: `blank-q-${Date.now()}`,
-        prompt: trimmed,
-        type: newType,
-      },
-    ]);
+    if (questions.length >= 50) {
+      setErrorMessage('A slam book can have at most 50 questions.');
+      return;
+    }
+
+    const nextQuestion = {
+      id: createQuestionId(),
+      text: trimmed,
+      type: newType,
+      order: questions.length,
+      required: false,
+    };
+
+    if (newType === 'multiple_choice') {
+      const parsedOptions = newOptionsText
+        .split(',')
+        .map((opt) => opt.trim())
+        .filter(Boolean);
+      nextQuestion.options = parsedOptions.length >= 2 ? parsedOptions : ['Option 1', 'Option 2'];
+    }
+
+    setQuestions((prev) => [...prev, nextQuestion]);
     setNewPrompt('');
+    setIsDirty(true);
   };
 
   const handleRemoveQuestion = (questionId) => {
-    setQuestions((prev) => prev.filter((q) => q.id !== questionId));
+    setQuestions((prev) =>
+      prev
+        .filter((q) => q.id !== questionId)
+        .map((q, idx) => ({ ...q, order: idx }))
+    );
+    setIsDirty(true);
   };
 
   const handleMoveQuestion = (index, direction) => {
@@ -82,68 +139,104 @@ function BlankBuilderPreview() {
     const copy = [...questions];
     const [moved] = copy.splice(index, 1);
     copy.splice(targetIndex, 0, moved);
-    setQuestions(copy);
+    setQuestions(copy.map((q, idx) => ({ ...q, order: idx })));
+    setIsDirty(true);
   };
 
-  const handlePromptEdit = (questionId, updatedPrompt) => {
+  const handleQuestionTextChange = (questionId, updatedText) => {
     setQuestions((prev) =>
-      prev.map((q) => (q.id === questionId ? { ...q, prompt: updatedPrompt } : q))
+      prev.map((q) => (q.id === questionId ? { ...q, text: updatedText } : q))
     );
+    setIsDirty(true);
   };
 
-  const handlePreviewSave = () => {
-    setPreviewSavedBanner(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  const handleQuestionTypeChange = (questionId, updatedType) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id !== questionId) return q;
+        const next = { ...q, type: updatedType };
+        if (updatedType === 'multiple_choice' && (!Array.isArray(next.options) || next.options.length < 2)) {
+          next.options = ['Option 1', 'Option 2'];
+        }
+        return next;
+      })
+    );
+    setIsDirty(true);
+  };
+
+  const handleQuestionOptionsChange = (questionId, rawCommaSeparated) => {
+    const options = rawCommaSeparated.split(',').map((s) => s.trim());
+    setQuestions((prev) =>
+      prev.map((q) => (q.id === questionId ? { ...q, options } : q))
+    );
+    setIsDirty(true);
+  };
+
+  const handleCancel = () => {
+    if (isDirty && !window.confirm('You have unsaved changes. Leave this slam book without saving?')) {
+      return;
+    }
+    navigate('/create');
+  };
+
+  const handleSaveBook = async (statusOverride) => {
+    if (isSaving) return;
+    setErrorMessage('');
+
+    if (!bookTitle.trim()) {
+      setErrorMessage('Please enter a title for your slam book before saving.');
+      return;
+    }
+
+    const finalStatus = statusOverride || bookStatus;
+    setIsSaving(true);
+
+    try {
+      const created = await createBook(user?.uid, {
+        title: bookTitle,
+        description: bookDescription,
+        templateId: null,
+        coverTheme,
+        status: finalStatus,
+        questions,
+      });
+
+      setIsDirty(false);
+      navigate('/dashboard', {
+        state: {
+          flashMessage: `Created "${created.title}" on your slam book shelf!`,
+        },
+      });
+    } catch (error) {
+      setErrorMessage(error.message || 'Could not save your slam book. Please try again.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <div className="builder-page">
       <div className="container">
-        {/* Milestone 1 Preview Mode Banner */}
-        <div className="preview-mode-banner" role="status" aria-live="polite">
+        {/* Top Studio Banner */}
+        <div className="preview-mode-banner" role="region" aria-label="Blank studio header">
           <div className="preview-mode-banner__content">
-            <span className="preview-mode-banner__badge">Milestone 1 Blank Builder Preview</span>
+            <span className="preview-mode-banner__badge">Blank Canvas Studio</span>
             <p className="preview-mode-banner__text">
-              <strong>Start From Scratch Studio:</strong> Design your own custom slam book layout
-              and prompts. Full Cloud Firestore persistence and share link generation will be
-              connected in Milestone 3.
+              <strong>Start From Scratch:</strong> Design your own custom slam book layout, cover
+              theme, and questions, then save directly to your private shelf.
             </p>
           </div>
           <div className="preview-mode-banner__actions">
-            <Button to="/create" variant="secondary" size="sm">
+            <Button variant="secondary" size="sm" onClick={handleCancel} disabled={isSaving}>
               &larr; Back to Templates
             </Button>
           </div>
         </div>
 
-        {previewSavedBanner && (
-          <div className="builder-saved-toast paper-card" role="alert">
-            <div className="builder-saved-toast__content">
-              <StarSticker size={22} />
-              <div>
-                <strong>Custom Slam Book Preview Ready! (&ldquo;{bookTitle}&rdquo;)</strong>
-                <p>
-                  You designed a custom slam book with {questions.length} questions. In Milestone 3,
-                  this button will save your book directly to Cloud Firestore.
-                </p>
-              </div>
-            </div>
-            <div className="builder-saved-toast__actions">
-              <Button
-                onClick={() =>
-                  navigate('/dashboard', {
-                    state: {
-                      showPreviewBanner: true,
-                      previewSource: 'builder',
-                    },
-                  })
-                }
-                variant="primary"
-                size="sm"
-              >
-                Return to Dashboard &rarr;
-              </Button>
-            </div>
+        {errorMessage && (
+          <div className="auth-alert auth-alert--error" role="alert">
+            {errorMessage}
           </div>
         )}
 
@@ -167,34 +260,47 @@ function BlankBuilderPreview() {
               <div className="builder-form-section">
                 <div className="form-group">
                   <label htmlFor="blank-book-title" className="form-label">
-                    Slam book title
+                    Slam book title <span className="required-indicator" aria-hidden="true">*</span>
                   </label>
                   <input
                     id="blank-book-title"
                     type="text"
+                    maxLength={100}
                     className="form-input"
                     placeholder="e.g., Hostel Wing B Memories"
                     value={bookTitle}
-                    onChange={(e) => setBookTitle(e.target.value)}
+                    disabled={isSaving}
+                    onChange={(e) => {
+                      setBookTitle(e.target.value);
+                      setIsDirty(true);
+                    }}
+                    required
                   />
+                  <span className="form-hint">{bookTitle.length}/100 characters</span>
                 </div>
 
                 <div className="form-group">
                   <label htmlFor="blank-book-desc" className="form-label">
-                    Welcome note for friends
+                    Welcome note / description
                   </label>
                   <textarea
                     id="blank-book-desc"
                     rows={3}
+                    maxLength={500}
                     className="form-input form-textarea"
                     placeholder="Write a warm note explaining what this slam book is for..."
                     value={bookDescription}
-                    onChange={(e) => setBookDescription(e.target.value)}
+                    disabled={isSaving}
+                    onChange={(e) => {
+                      setBookDescription(e.target.value);
+                      setIsDirty(true);
+                    }}
                   />
+                  <span className="form-hint">{bookDescription.length}/500 characters</span>
                 </div>
 
                 {/* Cover Colour Theme Selector */}
-                <fieldset className="theme-fieldset">
+                <fieldset className="theme-fieldset" disabled={isSaving}>
                   <legend className="form-label">Scrapbook cover theme</legend>
                   <div className="theme-swatches">
                     {COVER_THEMES.map((theme) => (
@@ -204,7 +310,10 @@ function BlankBuilderPreview() {
                         className={`theme-swatch theme-swatch--${theme.id} ${
                           coverTheme === theme.id ? 'theme-swatch--active' : ''
                         }`}
-                        onClick={() => setCoverTheme(theme.id)}
+                        onClick={() => {
+                          setCoverTheme(theme.id);
+                          setIsDirty(true);
+                        }}
                         aria-pressed={coverTheme === theme.id}
                       >
                         <span className="theme-swatch__dot" aria-hidden="true" />
@@ -213,16 +322,36 @@ function BlankBuilderPreview() {
                     ))}
                   </div>
                 </fieldset>
+
+                {/* Book Status Selector */}
+                <div className="form-group">
+                  <label htmlFor="blank-book-status" className="form-label">
+                    Book status
+                  </label>
+                  <select
+                    id="blank-book-status"
+                    className="form-input"
+                    value={bookStatus}
+                    disabled={isSaving}
+                    onChange={(e) => {
+                      setBookStatus(e.target.value);
+                      setIsDirty(true);
+                    }}
+                  >
+                    <option value="published">Published (Ready on my shelf)</option>
+                    <option value="draft">Draft (Still working on questions)</option>
+                  </select>
+                </div>
               </div>
 
               {/* Custom Questions Builder */}
               <div className="builder-questions-section">
                 <div className="builder-questions-header">
                   <h2 className="builder-section-heading">
-                    Your Custom Prompts ({questions.length})
+                    Your Custom Prompts ({questions.length}/50)
                   </h2>
                   <span className="form-hint">
-                    Add as many prompts as you like or reorder them below.
+                    Add up to 50 prompts or reorder them with the Up/Down buttons.
                   </span>
                 </div>
 
@@ -236,15 +365,33 @@ function BlankBuilderPreview() {
                       <li key={question.id} className="builder-question-item">
                         <div className="builder-question-item__top">
                           <span className="builder-question-number">Q{index + 1}</span>
-                          <span className="badge badge--lavender">
-                            {question.type.replace('_', ' ')}
-                          </span>
+
+                          <label
+                            htmlFor={`blank-q-type-${question.id}`}
+                            className="sr-only"
+                          >
+                            Question {index + 1} type
+                          </label>
+                          <select
+                            id={`blank-q-type-${question.id}`}
+                            className="form-input form-input--compact"
+                            value={question.type}
+                            disabled={isSaving}
+                            onChange={(e) => handleQuestionTypeChange(question.id, e.target.value)}
+                          >
+                            {QUESTION_TYPES.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.label}
+                              </option>
+                            ))}
+                          </select>
+
                           <div className="builder-question-controls">
                             <button
                               type="button"
                               className="icon-control-btn"
                               onClick={() => handleMoveQuestion(index, -1)}
-                              disabled={index === 0}
+                              disabled={index === 0 || isSaving}
                               aria-label={`Move question ${index + 1} up`}
                             >
                               &uarr;
@@ -253,7 +400,7 @@ function BlankBuilderPreview() {
                               type="button"
                               className="icon-control-btn"
                               onClick={() => handleMoveQuestion(index, 1)}
-                              disabled={index === questions.length - 1}
+                              disabled={index === questions.length - 1 || isSaving}
                               aria-label={`Move question ${index + 1} down`}
                             >
                               &darr;
@@ -262,6 +409,7 @@ function BlankBuilderPreview() {
                               type="button"
                               className="icon-control-btn icon-control-btn--danger"
                               onClick={() => handleRemoveQuestion(question.id)}
+                              disabled={isSaving}
                               aria-label={`Remove question ${index + 1}`}
                             >
                               &times;
@@ -279,9 +427,32 @@ function BlankBuilderPreview() {
                           id={`blank-q-input-${question.id}`}
                           type="text"
                           className="form-input"
-                          value={question.prompt}
-                          onChange={(e) => handlePromptEdit(question.id, e.target.value)}
+                          value={question.text}
+                          disabled={isSaving}
+                          onChange={(e) => handleQuestionTextChange(question.id, e.target.value)}
                         />
+
+                        {question.type === 'multiple_choice' && (
+                          <div style={{ marginTop: '8px' }}>
+                            <label
+                              htmlFor={`blank-q-options-${question.id}`}
+                              className="form-label"
+                              style={{ fontSize: '0.82rem' }}
+                            >
+                              Choices (comma-separated, at least 2):
+                            </label>
+                            <input
+                              id={`blank-q-options-${question.id}`}
+                              type="text"
+                              className="form-input"
+                              value={Array.isArray(question.options) ? question.options.join(', ') : ''}
+                              disabled={isSaving}
+                              onChange={(e) =>
+                                handleQuestionOptionsChange(question.id, e.target.value)
+                              }
+                            />
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ol>
@@ -301,6 +472,7 @@ function BlankBuilderPreview() {
                         className="form-input"
                         placeholder="e.g., What is your secret nickname for me?"
                         value={newPrompt}
+                        disabled={isSaving}
                         onChange={(e) => setNewPrompt(e.target.value)}
                       />
                     </div>
@@ -313,6 +485,7 @@ function BlankBuilderPreview() {
                         id="blank-new-type"
                         className="form-input"
                         value={newType}
+                        disabled={isSaving}
                         onChange={(e) => setNewType(e.target.value)}
                       >
                         {QUESTION_TYPES.map((t) => (
@@ -323,18 +496,48 @@ function BlankBuilderPreview() {
                       </select>
                     </div>
                   </div>
-                  <Button type="submit" variant="secondary" size="sm">
+
+                  {newType === 'multiple_choice' && (
+                    <div className="form-group">
+                      <label htmlFor="blank-new-options" className="form-label">
+                        Multiple choice options (comma-separated)
+                      </label>
+                      <input
+                        id="blank-new-options"
+                        type="text"
+                        className="form-input"
+                        placeholder="Option 1, Option 2, Option 3"
+                        value={newOptionsText}
+                        disabled={isSaving}
+                        onChange={(e) => setNewOptionsText(e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  <Button type="submit" variant="secondary" size="sm" disabled={isSaving}>
                     + Add Question
                   </Button>
                 </form>
               </div>
 
               <div className="builder-card__footer">
-                <Button to="/create" variant="ghost">
+                <Button variant="ghost" onClick={handleCancel} disabled={isSaving}>
                   Cancel
                 </Button>
-                <Button variant="primary" size="lg" onClick={handlePreviewSave}>
-                  Save Slam Book (Preview)
+                <Button
+                  variant="secondary"
+                  onClick={() => handleSaveBook('draft')}
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'Saving...' : 'Save as Draft'}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="lg"
+                  onClick={() => handleSaveBook(bookStatus)}
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'Saving to Shelf...' : 'Save Slam Book'}
                 </Button>
               </div>
             </div>
@@ -349,8 +552,11 @@ function BlankBuilderPreview() {
                 <div className="live-preview-card__stickers" aria-hidden="true">
                   <HeartSticker size={20} />
                   <FlowerSticker size={20} />
+                  <StarSticker size={20} />
                 </div>
-                <span className="live-preview-card__eyebrow">Live Friend View Preview</span>
+                <span className="live-preview-card__eyebrow">
+                  Live Preview &bull; {bookStatus === 'published' ? 'Published' : 'Draft'}
+                </span>
                 <h2 className="live-preview-card__title">
                   {bookTitle || 'Untitled Slam Book'}
                 </h2>
@@ -363,10 +569,14 @@ function BlankBuilderPreview() {
                 {questions.map((q, idx) => (
                   <div key={q.id} className="live-preview-field">
                     <span className="live-preview-field__label">
-                      {idx + 1}. {q.prompt}
+                      {idx + 1}. {q.text || 'Untitled question'}
                     </span>
                     <div className="live-preview-field__line" aria-hidden="true">
-                      Friend&rsquo;s handwritten-style answer goes here...
+                      {q.type === 'multiple_choice' && Array.isArray(q.options)
+                        ? `Choices: ${q.options.filter(Boolean).join(' / ')}`
+                        : q.type === 'date'
+                        ? 'DD / MM / YYYY'
+                        : 'Friend’s handwritten-style answer goes here...'}
                     </div>
                   </div>
                 ))}
@@ -380,4 +590,3 @@ function BlankBuilderPreview() {
 }
 
 export default BlankBuilderPreview;
-

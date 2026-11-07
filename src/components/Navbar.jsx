@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { SlamlyLogoMark } from '../assets/ScrapbookDoodles';
+import { useAuth } from '../context/AuthContext';
 import Button from './Button';
 
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   // Close mobile drawer whenever route changes
   useEffect(() => {
@@ -35,6 +38,19 @@ export default function Navbar() {
     if (target) {
       target.scrollIntoView({ behavior: 'smooth' });
       target.focus({ preventScroll: true });
+    }
+  }
+
+  async function handleLogout() {
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      setMobileMenuOpen(false);
+      navigate('/');
+    } catch {
+      // Keep UI responsive even if network hiccups during signOut
+    } finally {
+      setIsLoggingOut(false);
     }
   }
 
@@ -75,24 +91,43 @@ export default function Navbar() {
                 Features
               </a>
             </li>
-            <li>
-              <Link
-                to="/dashboard"
-                className={`nav-link ${location.pathname.startsWith('/dashboard') ? 'active' : ''}`}
-              >
-                Dashboard
-              </Link>
-            </li>
+            {user && (
+              <li>
+                <Link
+                  to="/create"
+                  className={`nav-link ${location.pathname.startsWith('/create') ? 'active' : ''}`}
+                >
+                  Create book
+                </Link>
+              </li>
+            )}
           </ul>
         </nav>
 
         <div className="nav-actions">
-          <Button to="/login" variant="ghost">
-            Log in
-          </Button>
-          <Button to="/create" variant="primary">
-            Create your book
-          </Button>
+          {user ? (
+            <>
+              <Button to="/dashboard" variant="secondary">
+                Dashboard
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+              >
+                {isLoggingOut ? 'Logging out...' : 'Log out'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button to="/login" variant="ghost">
+                Log in
+              </Button>
+              <Button to="/create" variant="primary">
+                Create your book
+              </Button>
+            </>
+          )}
         </div>
 
         <button
@@ -148,21 +183,39 @@ export default function Navbar() {
           >
             Features
           </a>
-          <Link to="/dashboard" className="nav-link">
-            Dashboard
-          </Link>
+          {user && (
+            <Link to="/create" className="nav-link">
+              Create book
+            </Link>
+          )}
 
           <div className="mobile-drawer-actions">
-            <Button to="/login" variant="secondary">
-              Log in
-            </Button>
-            <Button to="/create" variant="primary">
-              Create your book
-            </Button>
+            {user ? (
+              <>
+                <Button to="/dashboard" variant="secondary">
+                  Dashboard
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleLogout}
+                  disabled={isLoggingOut}
+                >
+                  {isLoggingOut ? 'Logging out...' : 'Log out'}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button to="/login" variant="secondary">
+                  Log in
+                </Button>
+                <Button to="/create" variant="primary">
+                  Create your book
+                </Button>
+              </>
+            )}
           </div>
         </nav>
       )}
     </header>
   );
 }
-

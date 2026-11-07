@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Button from '../components/Button';
+import { useAuth } from '../context/AuthContext';
+import { getFriendlyAuthErrorMessage } from '../firebase/authErrors';
 import {
   FlowerSticker,
   StarSticker,
@@ -9,18 +11,20 @@ import {
 
 /**
  * Login Page (/login)
- * Milestone 1 frontend-only login page with accessible validation.
- * Includes:
- * - Email field
- * - Password field
- * - Visual "Remember me" checkbox
- * - "Forgot password?" interactive preview notice
- * - "Login" button
- * - Link to /signup
- * After valid submit, navigates to /dashboard and shows "Preview mode: no real account created" banner.
+ * Connects user sign-in to Firebase Authentication (signInWithEmailAndPassword):
+ * - Unifies auth/invalid-credential, auth/wrong-password, and auth/user-not-found
+ *   into one generic message ("Incorrect email or password.").
+ * - Handles auth/too-many-requests, auth/user-disabled, and network errors.
+ * - Redirects the user back to the protected route they originally tried to visit,
+ *   defaulting to /dashboard.
  */
 function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { login } = useAuth();
+
+  // Return to the page the user originally requested, or /dashboard by default
+  const fromPath = location.state?.from?.pathname || '/dashboard';
 
   const [formData, setFormData] = useState({
     email: '',
@@ -29,7 +33,8 @@ function Login() {
   });
 
   const [errors, setErrors] = useState({});
-  const [showForgotNotice, setShowForgotNotice] = useState(false);
+  const [serverError, setServerError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleChange = (event) => {
     const { name, value, type, checked } = event.target;
@@ -43,6 +48,9 @@ function Login() {
         ...prev,
         [name]: '',
       }));
+    }
+    if (serverError) {
+      setServerError('');
     }
   };
 
@@ -59,44 +67,30 @@ function Login() {
 
     if (!formData.password) {
       nextErrors.password = 'Please enter your password.';
-    } else if (formData.password.length < 6) {
-      nextErrors.password = 'Password must be at least 6 characters long.';
     }
 
     return nextErrors;
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
-    const validationErrors = validateForm();
+    setServerError('');
 
+    const validationErrors = validateForm();
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
     }
 
-    const emailName = formData.email.trim().split('@')[0];
-    const formattedName =
-      emailName.charAt(0).toUpperCase() + emailName.slice(1).replace(/[._-]/g, ' ');
-
-    // Milestone 1 requirement: navigate to /dashboard and show preview mode banner
-    navigate('/dashboard', {
-      state: {
-        showPreviewBanner: true,
-        previewSource: 'login',
-        userName: formattedName || 'Aanya Sharma',
-        userEmail: formData.email.trim(),
-      },
-    });
-  };
-
-  const fillDemoCredentials = () => {
-    setFormData({
-      email: 'aanya@slamly.example',
-      password: 'password123',
-      rememberMe: true,
-    });
-    setErrors({});
+    setIsSubmitting(true);
+    try {
+      await login(formData.email, formData.password);
+      navigate(fromPath, { replace: true });
+    } catch (error) {
+      setServerError(getFriendlyAuthErrorMessage(error, 'login'));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -134,9 +128,8 @@ function Login() {
             <div className="auth-milestone-callout">
               <StarSticker size={18} />
               <p>
-                <strong>Milestone 1 Frontend Preview:</strong> Firebase Authentication will be
-                connected in Milestone 2. Logging in here demonstrates form validation and
-                navigates to the preview dashboard.
+                <strong>Keep your keepsakes safe:</strong> Sign in with your email and password to
+                access your personal slam book dashboard.
               </p>
             </div>
           </div>
@@ -157,16 +150,11 @@ function Login() {
               </p>
             </div>
 
-            <div className="auth-demo-helper">
-              <span>Want to test quickly?</span>
-              <button
-                type="button"
-                className="link-button"
-                onClick={fillDemoCredentials}
-              >
-                Fill demo login
-              </button>
-            </div>
+            {serverError && (
+              <div className="auth-alert auth-alert--error" role="alert">
+                {serverError}
+              </div>
+            )}
 
             <form className="auth-form" onSubmit={handleSubmit} noValidate>
               {/* Email Field */}
@@ -182,6 +170,7 @@ function Login() {
                   placeholder="you@example.com"
                   value={formData.email}
                   onChange={handleChange}
+                  disabled={isSubmitting}
                   className={`form-input ${errors.email ? 'form-input--error' : ''}`}
                   aria-invalid={Boolean(errors.email)}
                   aria-describedby={errors.email ? 'login-email-error' : undefined}
@@ -207,6 +196,7 @@ function Login() {
                   placeholder="Enter your password"
                   value={formData.password}
                   onChange={handleChange}
+                  disabled={isSubmitting}
                   className={`form-input ${errors.password ? 'form-input--error' : ''}`}
                   aria-invalid={Boolean(errors.password)}
                   aria-describedby={errors.password ? 'login-password-error' : undefined}
@@ -219,7 +209,7 @@ function Login() {
                 )}
               </div>
 
-              {/* Remember Me + Forgot Password Row */}
+              {/* Remember Me + Forgot Password Link Row */}
               <div className="auth-form__row">
                 <label htmlFor="login-remember" className="checkbox-label">
                   <input
@@ -228,35 +218,26 @@ function Login() {
                     type="checkbox"
                     checked={formData.rememberMe}
                     onChange={handleChange}
+                    disabled={isSubmitting}
                     className="checkbox-input"
                   />
                   <span>Remember me</span>
                 </label>
 
-                <button
-                  type="button"
-                  className="link-button"
-                  onClick={() => setShowForgotNotice((prev) => !prev)}
-                  aria-expanded={showForgotNotice}
-                >
+                <Link to="/forgot-password" className="auth-switch-link">
                   Forgot password?
-                </button>
+                </Link>
               </div>
 
-              {showForgotNotice && (
-                <div className="preview-inline-notice" role="status">
-                  <p>
-                    <strong>Milestone 2 Feature:</strong> Password reset emails powered by Firebase
-                    Authentication will be enabled in Milestone 2. For now, enter any valid email
-                    and a 6+ character password (or click <em>Fill demo login</em> above) to preview
-                    the dashboard!
-                  </p>
-                </div>
-              )}
-
               <div className="auth-form__actions">
-                <Button type="submit" variant="primary" size="lg" fullWidth>
-                  Login
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Logging in...' : 'Login'}
                 </Button>
               </div>
             </form>
@@ -277,4 +258,3 @@ function Login() {
 }
 
 export default Login;
-

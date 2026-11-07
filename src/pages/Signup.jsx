@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Button from '../components/Button';
+import { useAuth } from '../context/AuthContext';
+import { getFriendlyAuthErrorMessage } from '../firebase/authErrors';
 import {
   HeartSticker,
   StarSticker,
@@ -9,12 +11,15 @@ import {
 
 /**
  * Signup Page (/signup)
- * Milestone 1 frontend-only registration screen with accessible client-side validation.
- * On valid submission, navigates to /dashboard and displays the
- * "Preview mode: no real account created" banner.
+ * Connects user registration to Firebase Authentication:
+ * - Validates full name, email format, 6+ character password, and matching confirmation.
+ * - Creates the account with createUserWithEmailAndPassword.
+ * - Saves the full name to the Firebase user's displayName via updateProfile.
+ * - Redirects to /dashboard upon success.
  */
 function Signup() {
   const navigate = useNavigate();
+  const { signup } = useAuth();
 
   const [formData, setFormData] = useState({
     name: '',
@@ -24,6 +29,8 @@ function Signup() {
   });
 
   const [errors, setErrors] = useState({});
+  const [serverError, setServerError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -32,12 +39,14 @@ function Signup() {
       [name]: value,
     }));
 
-    // Clear individual field error when user edits the field
     if (errors[name]) {
       setErrors((prev) => ({
         ...prev,
         [name]: '',
       }));
+    }
+    if (serverError) {
+      setServerError('');
     }
   };
 
@@ -48,7 +57,7 @@ function Signup() {
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     if (!trimmedName) {
-      nextErrors.name = 'Please enter your name so friends know whose book it is.';
+      nextErrors.name = 'Please enter your full name so friends know whose book it is.';
     } else if (trimmedName.length < 2) {
       nextErrors.name = 'Name must be at least 2 characters long.';
     }
@@ -74,34 +83,25 @@ function Signup() {
     return nextErrors;
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
-    const validationErrors = validateForm();
+    setServerError('');
 
+    const validationErrors = validateForm();
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       return;
     }
 
-    // Milestone 1 requirement: navigate to /dashboard and display preview mode banner
-    navigate('/dashboard', {
-      state: {
-        showPreviewBanner: true,
-        previewSource: 'signup',
-        userName: formData.name.trim(),
-        userEmail: formData.email.trim(),
-      },
-    });
-  };
-
-  const fillDemoSignup = () => {
-    setFormData({
-      name: 'Aanya Sharma',
-      email: 'aanya@slamly.example',
-      password: 'password123',
-      confirmPassword: 'password123',
-    });
-    setErrors({});
+    setIsSubmitting(true);
+    try {
+      await signup(formData.name, formData.email, formData.password);
+      navigate('/dashboard', { replace: true });
+    } catch (error) {
+      setServerError(getFriendlyAuthErrorMessage(error, 'signup'));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -153,9 +153,8 @@ function Signup() {
             <div className="auth-milestone-callout">
               <HeartSticker size={18} />
               <p>
-                <strong>Milestone 1 Frontend Preview:</strong> Submitting this form validates your
-                inputs on the frontend and opens the interactive dashboard in preview mode without
-                creating a real database account yet.
+                <strong>Private by design:</strong> Your personal slam book shelf is protected by
+                your account login so only you can manage your books and curate friend entries.
               </p>
             </div>
           </div>
@@ -176,22 +175,17 @@ function Signup() {
               </p>
             </div>
 
-            <div className="auth-demo-helper">
-              <span>Testing Milestone 1?</span>
-              <button
-                type="button"
-                className="link-button"
-                onClick={fillDemoSignup}
-              >
-                Auto-fill sample details
-              </button>
-            </div>
+            {serverError && (
+              <div className="auth-alert auth-alert--error" role="alert">
+                {serverError}
+              </div>
+            )}
 
             <form className="auth-form" onSubmit={handleSubmit} noValidate>
-              {/* Name Field */}
+              {/* Full Name Field */}
               <div className="form-group">
                 <label htmlFor="signup-name" className="form-label">
-                  Name <span className="required-indicator" aria-hidden="true">*</span>
+                  Full name <span className="required-indicator" aria-hidden="true">*</span>
                 </label>
                 <input
                   id="signup-name"
@@ -201,6 +195,7 @@ function Signup() {
                   placeholder="e.g., Aanya Sharma"
                   value={formData.name}
                   onChange={handleChange}
+                  disabled={isSubmitting}
                   className={`form-input ${errors.name ? 'form-input--error' : ''}`}
                   aria-invalid={Boolean(errors.name)}
                   aria-describedby={errors.name ? 'signup-name-error' : undefined}
@@ -226,6 +221,7 @@ function Signup() {
                   placeholder="you@example.com"
                   value={formData.email}
                   onChange={handleChange}
+                  disabled={isSubmitting}
                   className={`form-input ${errors.email ? 'form-input--error' : ''}`}
                   aria-invalid={Boolean(errors.email)}
                   aria-describedby={errors.email ? 'signup-email-error' : undefined}
@@ -251,6 +247,7 @@ function Signup() {
                   placeholder="At least 6 characters"
                   value={formData.password}
                   onChange={handleChange}
+                  disabled={isSubmitting}
                   className={`form-input ${errors.password ? 'form-input--error' : ''}`}
                   aria-invalid={Boolean(errors.password)}
                   aria-describedby={
@@ -281,6 +278,7 @@ function Signup() {
                   placeholder="Re-enter your password"
                   value={formData.confirmPassword}
                   onChange={handleChange}
+                  disabled={isSubmitting}
                   className={`form-input ${errors.confirmPassword ? 'form-input--error' : ''}`}
                   aria-invalid={Boolean(errors.confirmPassword)}
                   aria-describedby={
@@ -296,8 +294,14 @@ function Signup() {
               </div>
 
               <div className="auth-form__actions">
-                <Button type="submit" variant="primary" size="lg" fullWidth>
-                  Create account
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Creating account...' : 'Create account'}
                 </Button>
               </div>
             </form>
@@ -318,4 +322,3 @@ function Signup() {
 }
 
 export default Signup;
-

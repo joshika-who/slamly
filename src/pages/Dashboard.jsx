@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Button from '../components/Button';
 import BookCard from '../components/BookCard';
-import { MOCK_SLAM_BOOKS, MOCK_USER_PROFILE } from '../data/mockBooks';
+import { useAuth } from '../context/AuthContext';
+import { deleteBook, getUserBooks } from '../services/bookService';
 import {
   FlowerSticker,
   HeartSticker,
@@ -12,87 +13,123 @@ import {
 
 /**
  * Dashboard Page (/dashboard)
- * Displays the user's personal slam book shelf using mock data in Milestone 1.
- * Includes:
- * - "Preview mode: no real account created" banner
- * - Welcome message
- * - "Create new slam book" button
- * - "My slam books" grid with BookCard components
- * - Toggleable Empty State for new users
- * - Interactive modal to preview sample responses or share links for any book
+ * Displays the authenticated user's real slam books from Cloud Firestore (`books/{bookId}`):
+ * - Queries only books where `ownerId == user.uid`, ordered newest first.
+ * - Shows title, cover theme, status ("published" or "draft"), question count, and creation date.
+ * - Provides Edit (`/books/:bookId/edit`) and Delete (with confirmation dialog).
+ * - Shows loading state while fetching, handles Firestore errors gracefully, and renders a
+ *   scrapbook-themed empty state when the user has no saved books yet.
  */
 function Dashboard() {
+  const navigate = useNavigate();
   const location = useLocation();
-  const routeState = location.state || {};
+  const { user, logout } = useAuth();
 
-  const displayUserName = routeState.userName || MOCK_USER_PROFILE.displayName;
-  const previewSource = routeState.previewSource || null;
+  // Derive greeting name from Firebase displayName, falling back to email prefix
+  const emailPrefix = user?.email ? user.email.split('@')[0] : '';
+  const displayUserName =
+    user?.displayName && user.displayName.trim()
+      ? user.displayName.trim()
+      : emailPrefix || 'Memory Keeper';
 
+  const [books, setBooks] = useState([]);
+  const [isLoadingBooks, setIsLoadingBooks] = useState(true);
+  const [fetchError, setFetchError] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [simulateEmptyState, setSimulateEmptyState] = useState(false);
-  const [selectedBookForMemories, setSelectedBookForMemories] = useState(null);
-  const [selectedBookForShare, setSelectedBookForShare] = useState(null);
-  const [copiedLink, setCopiedLink] = useState(false);
 
-  const books = simulateEmptyState ? [] : MOCK_SLAM_BOOKS;
+  const [flashMessage, setFlashMessage] = useState(location.state?.flashMessage || '');
+  const [bookToDelete, setBookToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const loadBooks = useCallback(async () => {
+    if (!user?.uid) return;
+    setIsLoadingBooks(true);
+    setFetchError('');
+
+    try {
+      const userBooks = await getUserBooks(user.uid);
+      setBooks(userBooks);
+    } catch (error) {
+      setFetchError(
+        error.message || 'Could not load your slam books from Cloud Firestore.'
+      );
+    } finally {
+      setIsLoadingBooks(false);
+    }
+  }, [user?.uid]);
+
+  useEffect(() => {
+    loadBooks();
+  }, [loadBooks]);
 
   const filteredBooks =
     statusFilter === 'All'
       ? books
       : books.filter((book) => book.status.toLowerCase() === statusFilter.toLowerCase());
 
-  const totalResponses = books.reduce((sum, book) => sum + book.responseCount, 0);
-  const activeBooksCount = books.filter((book) => book.status === 'Open').length;
+  const publishedCount = books.filter((book) => book.status === 'published').length;
+  const draftCount = books.filter((book) => book.status === 'draft').length;
 
-  const handleOpenMemories = (book) => {
-    setSelectedBookForMemories(book);
+  const handleRequestDelete = (book) => {
+    setDeleteError('');
+    setBookToDelete(book);
   };
 
-  const handleOpenShare = (book) => {
-    setSelectedBookForShare(book);
-    setCopiedLink(false);
-  };
+  const handleConfirmDelete = async () => {
+    if (!bookToDelete || isDeleting) return;
+    setIsDeleting(true);
+    setDeleteError('');
 
-  const handleCopyShareLink = (slug) => {
-    const shareUrl = `https://${slug}`;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(shareUrl).catch(() => {});
+    try {
+      await deleteBook(user.uid, bookToDelete.id);
+      const deletedTitle = bookToDelete.title;
+      setBooks((prev) => prev.filter((b) => b.id !== bookToDelete.id));
+      setBookToDelete(null);
+      setFlashMessage(`Deleted "${deletedTitle}" from your shelf.`);
+    } catch (error) {
+      setDeleteError(error.message || 'Could not delete this slam book.');
+    } finally {
+      setIsDeleting(false);
     }
-    setCopiedLink(true);
+  };
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      navigate('/');
+    } catch {
+      setIsLoggingOut(false);
+    }
   };
 
   return (
     <div className="dashboard-page">
       <div className="container">
-        {/* Required Milestone 1 Preview Mode Banner */}
-        <div
-          className="preview-mode-banner"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="preview-mode-banner__content">
-            <span className="preview-mode-banner__badge">Milestone 1</span>
-            <p className="preview-mode-banner__text">
-              <strong>Preview mode: no real account created.</strong>{' '}
-              {previewSource === 'signup' &&
-                `Welcome, ${displayUserName}! Your signup form passed frontend validation. `}
-              {previewSource === 'login' &&
-                `Welcome back, ${displayUserName}! Your login form passed frontend validation. `}
-              You are viewing Slamly with sample slam books. Real Firebase Authentication and Cloud
-              Firestore persistence will be connected in Milestone 2.
-            </p>
-          </div>
-          <div className="preview-mode-banner__actions">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setSimulateEmptyState((prev) => !prev)}
-              aria-pressed={simulateEmptyState}
+        {flashMessage && (
+          <div className="auth-alert auth-alert--success" role="status" aria-live="polite">
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+              }}
             >
-              {simulateEmptyState ? 'Show Sample Books (4)' : 'Preview New User Empty State'}
-            </Button>
+              <span>{flashMessage}</span>
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => setFlashMessage('')}
+                aria-label="Dismiss notification"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Welcome Header Banner */}
         <header className="dashboard-welcome-card paper-card">
@@ -107,14 +144,25 @@ function Dashboard() {
                 Welcome back, {displayUserName}!
               </h1>
               <p className="dashboard-header__subtitle">
-                Manage your personal slam books, read what friends have written, or start a brand
-                new keepsake book for your next chapter.
+                Create, customise, and manage your personal digital slam books. Everything on your
+                shelf is private to your account.
               </p>
             </div>
 
-            <div className="dashboard-header__cta">
+            <div
+              className="dashboard-header__cta"
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}
+            >
               <Button to="/create" variant="primary" size="lg">
                 + Create new slam book
+              </Button>
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+              >
+                {isLoggingOut ? 'Logging out...' : 'Log out'}
               </Button>
             </div>
           </div>
@@ -123,15 +171,15 @@ function Dashboard() {
           <div className="dashboard-stats" aria-label="Slam book summary statistics">
             <div className="dashboard-stat-pill">
               <span className="dashboard-stat-pill__value">{books.length}</span>
-              <span className="dashboard-stat-pill__label">Slam Books</span>
+              <span className="dashboard-stat-pill__label">Saved Books</span>
             </div>
             <div className="dashboard-stat-pill">
-              <span className="dashboard-stat-pill__value">{totalResponses}</span>
-              <span className="dashboard-stat-pill__label">Friend Responses</span>
+              <span className="dashboard-stat-pill__value">{publishedCount}</span>
+              <span className="dashboard-stat-pill__label">Published</span>
             </div>
             <div className="dashboard-stat-pill">
-              <span className="dashboard-stat-pill__value">{activeBooksCount}</span>
-              <span className="dashboard-stat-pill__label">Open for Replies</span>
+              <span className="dashboard-stat-pill__value">{draftCount}</span>
+              <span className="dashboard-stat-pill__label">Drafts</span>
             </div>
           </div>
         </header>
@@ -144,17 +192,17 @@ function Dashboard() {
                 My slam books
               </h2>
               <p className="dashboard-section-subtitle">
-                Each slam book has its own custom questions, theme colour, and share link.
+                Saved privately to your Cloud Firestore shelf.
               </p>
             </div>
 
-            {!simulateEmptyState && (
+            {books.length > 0 && (
               <div
                 className="filter-tabs"
                 role="group"
                 aria-label="Filter slam books by status"
               >
-                {['All', 'Open', 'Draft', 'Closed'].map((tab) => (
+                {['All', 'Published', 'Draft'].map((tab) => (
                   <button
                     key={tab}
                     type="button"
@@ -169,8 +217,35 @@ function Dashboard() {
             )}
           </div>
 
-          {/* Empty State for New Users */}
-          {filteredBooks.length === 0 ? (
+          {/* Loading State */}
+          {isLoadingBooks ? (
+            <div className="paper-card empty-state" role="status" aria-live="polite">
+              <span className="washi-tape tape-lavender" aria-hidden="true" />
+              <div className="auth-loading-card__spinner" aria-hidden="true">
+                <StarSticker size={28} />
+              </div>
+              <h3 className="empty-state__title">Loading your slam book shelf...</h3>
+              <p className="empty-state__description">
+                Fetching your saved books from Cloud Firestore.
+              </p>
+            </div>
+          ) : fetchError ? (
+            /* Error State */
+            <div className="paper-card empty-state" role="alert">
+              <span className="washi-tape washi-tape--pink" aria-hidden="true" />
+              <h3 className="empty-state__title">Could not load your slam books</h3>
+              <p className="empty-state__description">{fetchError}</p>
+              <div className="empty-state__actions">
+                <Button variant="primary" onClick={loadBooks}>
+                  Try Again
+                </Button>
+                <Button to="/create" variant="secondary">
+                  + Create a Slam Book
+                </Button>
+              </div>
+            </div>
+          ) : filteredBooks.length === 0 ? (
+            /* Empty State */
             <div className="empty-state paper-card" role="region" aria-label="No slam books found">
               <span className="washi-tape tape-lavender" aria-hidden="true" />
               <div className="empty-state__illustration">
@@ -183,12 +258,12 @@ function Dashboard() {
                   <StarSticker size={22} />
                 </div>
                 <h3 className="empty-state__title">
-                  {simulateEmptyState
+                  {books.length === 0
                     ? 'Your slam book shelf is waiting for its first story!'
                     : `No "${statusFilter}" slam books found`}
                 </h3>
                 <p className="empty-state__description">
-                  {simulateEmptyState
+                  {books.length === 0
                     ? 'Start with a ready-made template like Friendship, College Memories, or School Farewell — or build your own custom slam book from scratch.'
                     : 'Try switching the status filter back to "All" or create a new slam book.'}
                 </p>
@@ -196,15 +271,7 @@ function Dashboard() {
                   <Button to="/create" variant="primary" size="lg">
                     + Create your first slam book
                   </Button>
-                  {simulateEmptyState ? (
-                    <Button
-                      variant="secondary"
-                      size="lg"
-                      onClick={() => setSimulateEmptyState(false)}
-                    >
-                      Restore sample books
-                    </Button>
-                  ) : (
+                  {books.length > 0 && (
                     <Button
                       variant="secondary"
                       size="lg"
@@ -217,13 +284,13 @@ function Dashboard() {
               </div>
             </div>
           ) : (
+            /* Books Grid */
             <div className="books-grid">
               {filteredBooks.map((book) => (
                 <BookCard
                   key={book.id}
                   book={book}
-                  onSelectBook={handleOpenMemories}
-                  onCopySharePreview={handleOpenShare}
+                  onDeleteRequest={handleRequestDelete}
                 />
               ))}
             </div>
@@ -231,152 +298,59 @@ function Dashboard() {
         </section>
       </div>
 
-      {/* Modal 1: Sample Memories / Responses Viewer */}
-      {selectedBookForMemories && (
+      {/* Delete Confirmation Modal */}
+      {bookToDelete && (
         <div
           className="modal-backdrop"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="memories-modal-title"
+          aria-labelledby="delete-modal-title"
         >
           <div className="paper-card modal-card">
-            <span className="washi-tape" aria-hidden="true" />
+            <span className="washi-tape washi-tape--pink" aria-hidden="true" />
             <div className="modal-card__header">
               <div>
-                <span className="badge badge--sage">{selectedBookForMemories.themeName}</span>
-                <h3 id="memories-modal-title" className="modal-card__title">
-                  {selectedBookForMemories.title}
+                <span className="badge badge--pink">Confirm Deletion</span>
+                <h3 id="delete-modal-title" className="modal-card__title">
+                  Delete &ldquo;{bookToDelete.title}&rdquo;?
                 </h3>
                 <p className="modal-card__subtitle">
-                  {selectedBookForMemories.responseCount} responses collected &bull; Previewing
-                  sample friend entries
+                  This action permanently removes this slam book and all of its questions from your
+                  shelf. This cannot be undone.
                 </p>
               </div>
               <button
                 type="button"
                 className="modal-close-btn"
-                onClick={() => setSelectedBookForMemories(null)}
-                aria-label="Close memories preview"
+                onClick={() => !isDeleting && setBookToDelete(null)}
+                disabled={isDeleting}
+                aria-label="Close delete confirmation"
               >
                 &times;
               </button>
             </div>
 
-            <div className="modal-card__body">
-              {selectedBookForMemories.sampleResponses &&
-              selectedBookForMemories.sampleResponses.length > 0 ? (
-                <div className="sample-responses-list">
-                  {selectedBookForMemories.sampleResponses.map((entry, idx) => (
-                    <article key={idx} className="sample-response-card">
-                      <div className="sample-response-card__header">
-                        <strong>{entry.friendName}</strong>
-                        <span className="sample-response-card__nickname">
-                          One word for you: &ldquo;{entry.oneWordForMe}&rdquo;
-                        </span>
-                      </div>
-                      <p className="sample-response-card__quote">
-                        &ldquo;{entry.favoriteMemory}&rdquo;
-                      </p>
-                      <span className="sample-response-card__song">
-                        Dedication song: {entry.songDedication}
-                      </span>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="preview-inline-notice">
-                  <p>
-                    This book is currently a <strong>Draft</strong> and hasn&rsquo;t been shared
-                    with friends yet. Once you publish and share the link in Milestone 4, friend
-                    responses will appear right here!
-                  </p>
-                </div>
-              )}
-            </div>
+            {deleteError && (
+              <div className="auth-alert auth-alert--error" role="alert">
+                {deleteError}
+              </div>
+            )}
 
             <div className="modal-card__footer">
               <Button
-                to="/create/template/friendship"
                 variant="secondary"
+                onClick={() => setBookToDelete(null)}
+                disabled={isDeleting}
               >
-                Customise Questions
+                Keep Book
               </Button>
               <Button
                 variant="primary"
-                onClick={() => setSelectedBookForMemories(null)}
+                className="btn-danger"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
               >
-                Done Reading
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal 2: Share Link Preview Modal */}
-      {selectedBookForShare && (
-        <div
-          className="modal-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="share-modal-title"
-        >
-          <div className="paper-card modal-card">
-            <span className="washi-tape tape-sage" aria-hidden="true" />
-            <div className="modal-card__header">
-              <div>
-                <span className="badge badge--lavender">Shareable Link Preview</span>
-                <h3 id="share-modal-title" className="modal-card__title">
-                  Invite friends to sign &ldquo;{selectedBookForShare.title}&rdquo;
-                </h3>
-                <p className="modal-card__subtitle">
-                  Friends can answer your slam book directly from their browser without creating an
-                  account.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="modal-close-btn"
-                onClick={() => setSelectedBookForShare(null)}
-                aria-label="Close share modal"
-              >
-                &times;
-              </button>
-            </div>
-
-            <div className="modal-card__body">
-              <label htmlFor="share-url-input" className="form-label">
-                Unique slam book link (Milestone 4 preview)
-              </label>
-              <div className="share-link-box">
-                <input
-                  id="share-url-input"
-                  type="text"
-                  readOnly
-                  className="form-input"
-                  value={`https://${selectedBookForShare.shareSlug}`}
-                />
-                <Button
-                  variant="primary"
-                  onClick={() => handleCopyShareLink(selectedBookForShare.shareSlug)}
-                >
-                  {copiedLink ? 'Copied!' : 'Copy Link'}
-                </Button>
-              </div>
-
-              <div className="preview-inline-notice" style={{ marginTop: '1rem' }}>
-                <p>
-                  <strong>Roadmap Note:</strong> Public friend response links and real-time response
-                  collection will be enabled in Milestone 4 once Firestore is connected.
-                </p>
-              </div>
-            </div>
-
-            <div className="modal-card__footer">
-              <Button
-                variant="secondary"
-                onClick={() => setSelectedBookForShare(null)}
-              >
-                Close
+                {isDeleting ? 'Deleting...' : 'Yes, Delete Book'}
               </Button>
             </div>
           </div>

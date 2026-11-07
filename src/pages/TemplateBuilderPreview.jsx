@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Button from '../components/Button';
+import { useAuth } from '../context/AuthContext';
 import { BOOK_TEMPLATES } from '../data/mockBooks';
+import {
+  cloneTemplateQuestions,
+  createBook,
+  createQuestionId,
+} from '../services/bookService';
 import {
   FlowerSticker,
   HeartSticker,
@@ -18,59 +24,72 @@ const COVER_THEMES = [
 const QUESTION_TYPES = [
   { id: 'short_answer', label: 'Short Answer' },
   { id: 'paragraph', label: 'Long Story / Paragraph' },
+  { id: 'date', label: 'Date / Memory Date' },
+  { id: 'multiple_choice', label: 'Multiple Choice' },
   { id: 'polaroid_prompt', label: 'Memory / Vibe Check' },
 ];
 
 /**
  * TemplateBuilderPreview Page (/create/template/:id)
- * Milestone 1 interactive preview screen for customising a chosen template.
- * Clearly indicates that cloud saving to Firestore will be connected in Milestone 3.
+ * Connects template-based slam book creation to Cloud Firestore in Milestone 3:
+ * - Deep-copies the chosen template's questions into local state (never storing a reference).
+ * - Supports editing title, description, cover theme, status, and adding/editing/reordering/deleting questions.
+ * - Saves the new book to `books/{bookId}` via `createBook()` and redirects to `/dashboard`.
  */
 function TemplateBuilderPreview() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const matchedTemplate = BOOK_TEMPLATES.find((t) => t.id === id);
 
   const [bookTitle, setBookTitle] = useState(
-    matchedTemplate ? `My ${matchedTemplate.title} Slam Book` : 'My Custom Slam Book'
+    matchedTemplate ? `My ${matchedTemplate.title} Slam Book` : ''
   );
   const [bookDescription, setBookDescription] = useState(
     matchedTemplate ? matchedTemplate.description : ''
   );
-  const [coverTheme, setCoverTheme] = useState('pink');
-  const [questions, setQuestions] = useState(
-    matchedTemplate
-      ? matchedTemplate.defaultQuestions.map((q) => ({
-          id: q.id,
-          prompt: q.text,
-          type: q.type,
-          required: q.required,
-        }))
-      : []
+  const [coverTheme, setCoverTheme] = useState(
+    matchedTemplate?.coverTheme || 'pink'
+  );
+  const [bookStatus, setBookStatus] = useState('published');
+  const [questions, setQuestions] = useState(() =>
+    matchedTemplate ? cloneTemplateQuestions(matchedTemplate.defaultQuestions) : []
   );
 
   const [newPrompt, setNewPrompt] = useState('');
   const [newType, setNewType] = useState('short_answer');
-  const [previewSavedBanner, setPreviewSavedBanner] = useState(false);
+  const [newOptionsText, setNewOptionsText] = useState('Chai, Coffee, Hot Chocolate');
 
-  // Sync state if URL param changes to a different template ID
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  // Reset builder state if route parameter :id changes to another template
   useEffect(() => {
     const found = BOOK_TEMPLATES.find((t) => t.id === id);
     if (found) {
       setBookTitle(`My ${found.title} Slam Book`);
       setBookDescription(found.description);
-      setQuestions(
-        found.defaultQuestions.map((q) => ({
-          id: q.id,
-          prompt: q.text,
-          type: q.type,
-          required: q.required,
-        }))
-      );
-      setPreviewSavedBanner(false);
+      setCoverTheme(found.coverTheme || 'pink');
+      setBookStatus('published');
+      setQuestions(cloneTemplateQuestions(found.defaultQuestions));
+      setIsDirty(false);
+      setErrorMessage('');
     }
   }, [id]);
+
+  // Warn user before closing or refreshing browser tab with unsaved edits
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      if (isDirty && !isSaving) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty, isSaving]);
 
   if (!matchedTemplate) {
     return (
@@ -99,22 +118,46 @@ function TemplateBuilderPreview() {
 
   const handleAddQuestion = (event) => {
     event.preventDefault();
+    setErrorMessage('');
     const trimmed = newPrompt.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      setErrorMessage('Please enter a question prompt before clicking Add Question.');
+      return;
+    }
+
+    if (questions.length >= 50) {
+      setErrorMessage('A slam book can have at most 50 questions.');
+      return;
+    }
 
     const nextQuestion = {
-      id: `custom-${Date.now()}`,
-      prompt: trimmed,
+      id: createQuestionId(),
+      text: trimmed,
       type: newType,
+      order: questions.length,
       required: false,
     };
 
+    if (newType === 'multiple_choice') {
+      const parsedOptions = newOptionsText
+        .split(',')
+        .map((opt) => opt.trim())
+        .filter(Boolean);
+      nextQuestion.options = parsedOptions.length >= 2 ? parsedOptions : ['Option 1', 'Option 2'];
+    }
+
     setQuestions((prev) => [...prev, nextQuestion]);
     setNewPrompt('');
+    setIsDirty(true);
   };
 
   const handleRemoveQuestion = (questionId) => {
-    setQuestions((prev) => prev.filter((q) => q.id !== questionId));
+    setQuestions((prev) =>
+      prev
+        .filter((q) => q.id !== questionId)
+        .map((q, idx) => ({ ...q, order: idx }))
+    );
+    setIsDirty(true);
   };
 
   const handleMoveQuestion = (index, direction) => {
@@ -124,68 +167,100 @@ function TemplateBuilderPreview() {
     const updated = [...questions];
     const [moved] = updated.splice(index, 1);
     updated.splice(targetIndex, 0, moved);
-    setQuestions(updated);
+    setQuestions(updated.map((q, idx) => ({ ...q, order: idx })));
+    setIsDirty(true);
   };
 
-  const handlePromptEdit = (questionId, updatedPrompt) => {
+  const handleQuestionTextChange = (questionId, updatedText) => {
     setQuestions((prev) =>
-      prev.map((q) => (q.id === questionId ? { ...q, prompt: updatedPrompt } : q))
+      prev.map((q) => (q.id === questionId ? { ...q, text: updatedText } : q))
     );
+    setIsDirty(true);
   };
 
-  const handlePreviewSave = () => {
-    setPreviewSavedBanner(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  const handleQuestionTypeChange = (questionId, updatedType) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id !== questionId) return q;
+        const next = { ...q, type: updatedType };
+        if (updatedType === 'multiple_choice' && (!Array.isArray(next.options) || next.options.length < 2)) {
+          next.options = ['Option 1', 'Option 2'];
+        }
+        return next;
+      })
+    );
+    setIsDirty(true);
+  };
+
+  const handleQuestionOptionsChange = (questionId, rawCommaSeparated) => {
+    const options = rawCommaSeparated.split(',').map((s) => s.trim());
+    setQuestions((prev) =>
+      prev.map((q) => (q.id === questionId ? { ...q, options } : q))
+    );
+    setIsDirty(true);
+  };
+
+  const handleCancel = () => {
+    if (isDirty && !window.confirm('You have unsaved changes. Leave this slam book without saving?')) {
+      return;
+    }
+    navigate('/create');
+  };
+
+  const handleSaveBook = async (statusOverride) => {
+    if (isSaving) return;
+    setErrorMessage('');
+
+    const finalStatus = statusOverride || bookStatus;
+    setIsSaving(true);
+
+    try {
+      const created = await createBook(user?.uid, {
+        title: bookTitle,
+        description: bookDescription,
+        templateId: matchedTemplate.id,
+        coverTheme,
+        status: finalStatus,
+        questions,
+      });
+
+      setIsDirty(false);
+      navigate('/dashboard', {
+        state: {
+          flashMessage: `Saved "${created.title}" to your slam book shelf!`,
+        },
+      });
+    } catch (error) {
+      setErrorMessage(error.message || 'Could not save your slam book. Please try again.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <div className="builder-page">
       <div className="container">
-        {/* Milestone 1 Preview Mode Notice */}
-        <div className="preview-mode-banner" role="status" aria-live="polite">
+        {/* Top Builder Banner */}
+        <div className="preview-mode-banner" role="region" aria-label="Template builder header">
           <div className="preview-mode-banner__content">
-            <span className="preview-mode-banner__badge">Milestone 1 Builder Preview</span>
+            <span className="preview-mode-banner__badge">Template Studio</span>
             <p className="preview-mode-banner__text">
-              <strong>Interactive Template Customiser ({matchedTemplate.title}):</strong> You can
-              edit the book title, switch pastel cover colours, and add, edit, reorder, or delete
-              questions below. Saving books to Cloud Firestore will be enabled in Milestone 3.
+              <strong>Starting from &ldquo;{matchedTemplate.title}&rdquo;:</strong> These questions
+              have been copied into your new book. Edit anything you like, then save directly to
+              your private shelf.
             </p>
           </div>
           <div className="preview-mode-banner__actions">
-            <Button to="/create" variant="secondary" size="sm">
+            <Button variant="secondary" size="sm" onClick={handleCancel} disabled={isSaving}>
               &larr; Switch Template
             </Button>
           </div>
         </div>
 
-        {previewSavedBanner && (
-          <div className="builder-saved-toast paper-card" role="alert">
-            <div className="builder-saved-toast__content">
-              <StarSticker size={22} />
-              <div>
-                <strong>Preview Saved! (&ldquo;{bookTitle}&rdquo;)</strong>
-                <p>
-                  In Milestone 1, your customised template with {questions.length} prompts is
-                  previewed in browser memory. Ready to return to your dashboard?
-                </p>
-              </div>
-            </div>
-            <div className="builder-saved-toast__actions">
-              <Button
-                onClick={() =>
-                  navigate('/dashboard', {
-                    state: {
-                      showPreviewBanner: true,
-                      previewSource: 'builder',
-                    },
-                  })
-                }
-                variant="primary"
-                size="sm"
-              >
-                Go to Dashboard &rarr;
-              </Button>
-            </div>
+        {errorMessage && (
+          <div className="auth-alert auth-alert--error" role="alert">
+            {errorMessage}
           </div>
         )}
 
@@ -198,43 +273,56 @@ function TemplateBuilderPreview() {
               <div className="builder-card__header">
                 <span className="badge badge--pink">{matchedTemplate.badge}</span>
                 <h1 id="builder-editor-heading" className="builder-card__title">
-                  Customise &ldquo;{matchedTemplate.title}&rdquo; Template
+                  Customise &ldquo;{matchedTemplate.title}&rdquo; Slam Book
                 </h1>
                 <p className="builder-card__subtitle">
-                  Make this slam book unmistakably yours before sharing it with your friends.
+                  Make this slam book unmistakably yours before saving it to your shelf.
                 </p>
               </div>
 
-              {/* Book Title & Description */}
+              {/* Book Title, Description, Cover Theme & Status */}
               <div className="builder-form-section">
                 <div className="form-group">
                   <label htmlFor="template-book-title" className="form-label">
-                    Slam book title
+                    Slam book title <span className="required-indicator" aria-hidden="true">*</span>
                   </label>
                   <input
                     id="template-book-title"
                     type="text"
+                    maxLength={100}
                     className="form-input"
                     value={bookTitle}
-                    onChange={(e) => setBookTitle(e.target.value)}
+                    disabled={isSaving}
+                    onChange={(e) => {
+                      setBookTitle(e.target.value);
+                      setIsDirty(true);
+                    }}
+                    required
                   />
+                  <span className="form-hint">{bookTitle.length}/100 characters</span>
                 </div>
 
                 <div className="form-group">
                   <label htmlFor="template-book-desc" className="form-label">
-                    Welcome note for friends
+                    Welcome note / description
                   </label>
                   <textarea
                     id="template-book-desc"
                     rows={3}
+                    maxLength={500}
                     className="form-input form-textarea"
                     value={bookDescription}
-                    onChange={(e) => setBookDescription(e.target.value)}
+                    disabled={isSaving}
+                    onChange={(e) => {
+                      setBookDescription(e.target.value);
+                      setIsDirty(true);
+                    }}
                   />
+                  <span className="form-hint">{bookDescription.length}/500 characters</span>
                 </div>
 
                 {/* Cover Colour Theme Selector */}
-                <fieldset className="theme-fieldset">
+                <fieldset className="theme-fieldset" disabled={isSaving}>
                   <legend className="form-label">Scrapbook cover theme</legend>
                   <div className="theme-swatches">
                     {COVER_THEMES.map((theme) => (
@@ -244,7 +332,10 @@ function TemplateBuilderPreview() {
                         className={`theme-swatch theme-swatch--${theme.id} ${
                           coverTheme === theme.id ? 'theme-swatch--active' : ''
                         }`}
-                        onClick={() => setCoverTheme(theme.id)}
+                        onClick={() => {
+                          setCoverTheme(theme.id);
+                          setIsDirty(true);
+                        }}
                         aria-pressed={coverTheme === theme.id}
                       >
                         <span className="theme-swatch__dot" aria-hidden="true" />
@@ -253,71 +344,141 @@ function TemplateBuilderPreview() {
                     ))}
                   </div>
                 </fieldset>
+
+                {/* Book Status Selector */}
+                <div className="form-group">
+                  <label htmlFor="template-book-status" className="form-label">
+                    Book status
+                  </label>
+                  <select
+                    id="template-book-status"
+                    className="form-input"
+                    value={bookStatus}
+                    disabled={isSaving}
+                    onChange={(e) => {
+                      setBookStatus(e.target.value);
+                      setIsDirty(true);
+                    }}
+                  >
+                    <option value="published">Published (Ready on my shelf)</option>
+                    <option value="draft">Draft (Still working on questions)</option>
+                  </select>
+                </div>
               </div>
 
               {/* Questions List */}
               <div className="builder-questions-section">
                 <div className="builder-questions-header">
                   <h2 className="builder-section-heading">
-                    Questions ({questions.length})
+                    Questions ({questions.length}/50)
                   </h2>
                   <span className="form-hint">
-                    Edit any prompt directly or use the arrows to reorder.
+                    Edit any prompt directly or use the Up/Down buttons to reorder.
                   </span>
                 </div>
 
-                <ol className="builder-questions-list">
-                  {questions.map((question, index) => (
-                    <li key={question.id} className="builder-question-item">
-                      <div className="builder-question-item__top">
-                        <span className="builder-question-number">Q{index + 1}</span>
-                        <span className="badge badge--sage">{question.type.replace('_', ' ')}</span>
-                        <div className="builder-question-controls">
-                          <button
-                            type="button"
-                            className="icon-control-btn"
-                            onClick={() => handleMoveQuestion(index, -1)}
-                            disabled={index === 0}
-                            aria-label={`Move question ${index + 1} up`}
-                          >
-                            &uarr;
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-control-btn"
-                            onClick={() => handleMoveQuestion(index, 1)}
-                            disabled={index === questions.length - 1}
-                            aria-label={`Move question ${index + 1} down`}
-                          >
-                            &darr;
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-control-btn icon-control-btn--danger"
-                            onClick={() => handleRemoveQuestion(question.id)}
-                            aria-label={`Remove question ${index + 1}`}
-                          >
-                            &times;
-                          </button>
-                        </div>
-                      </div>
+                {questions.length === 0 ? (
+                  <div className="preview-inline-notice">
+                    <p>No questions in this book yet. Add at least one question below before saving.</p>
+                  </div>
+                ) : (
+                  <ol className="builder-questions-list">
+                    {questions.map((question, index) => (
+                      <li key={question.id} className="builder-question-item">
+                        <div className="builder-question-item__top">
+                          <span className="builder-question-number">Q{index + 1}</span>
 
-                      <label
-                        htmlFor={`q-input-${question.id}`}
-                        className="sr-only"
-                      >
-                        Question {index + 1} prompt
-                      </label>
-                      <input
-                        id={`q-input-${question.id}`}
-                        type="text"
-                        className="form-input"
-                        value={question.prompt}
-                        onChange={(e) => handlePromptEdit(question.id, e.target.value)}
-                      />
-                    </li>
-                  ))}
-                </ol>
+                          <label
+                            htmlFor={`q-type-${question.id}`}
+                            className="sr-only"
+                          >
+                            Question {index + 1} type
+                          </label>
+                          <select
+                            id={`q-type-${question.id}`}
+                            className="form-input form-input--compact"
+                            value={question.type}
+                            disabled={isSaving}
+                            onChange={(e) => handleQuestionTypeChange(question.id, e.target.value)}
+                          >
+                            {QUESTION_TYPES.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.label}
+                              </option>
+                            ))}
+                          </select>
+
+                          <div className="builder-question-controls">
+                            <button
+                              type="button"
+                              className="icon-control-btn"
+                              onClick={() => handleMoveQuestion(index, -1)}
+                              disabled={index === 0 || isSaving}
+                              aria-label={`Move question ${index + 1} up`}
+                            >
+                              &uarr;
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-control-btn"
+                              onClick={() => handleMoveQuestion(index, 1)}
+                              disabled={index === questions.length - 1 || isSaving}
+                              aria-label={`Move question ${index + 1} down`}
+                            >
+                              &darr;
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-control-btn icon-control-btn--danger"
+                              onClick={() => handleRemoveQuestion(question.id)}
+                              disabled={isSaving}
+                              aria-label={`Remove question ${index + 1}`}
+                            >
+                              &times;
+                            </button>
+                          </div>
+                        </div>
+
+                        <label
+                          htmlFor={`q-input-${question.id}`}
+                          className="sr-only"
+                        >
+                          Question {index + 1} prompt
+                        </label>
+                        <input
+                          id={`q-input-${question.id}`}
+                          type="text"
+                          className="form-input"
+                          value={question.text}
+                          disabled={isSaving}
+                          onChange={(e) => handleQuestionTextChange(question.id, e.target.value)}
+                        />
+
+                        {question.type === 'multiple_choice' && (
+                          <div style={{ marginTop: '8px' }}>
+                            <label
+                              htmlFor={`q-options-${question.id}`}
+                              className="form-label"
+                              style={{ fontSize: '0.82rem' }}
+                            >
+                              Choices (comma-separated, at least 2):
+                            </label>
+                            <input
+                              id={`q-options-${question.id}`}
+                              type="text"
+                              className="form-input"
+                              value={Array.isArray(question.options) ? question.options.join(', ') : ''}
+                              disabled={isSaving}
+                              onChange={(e) =>
+                                handleQuestionOptionsChange(question.id, e.target.value)
+                              }
+                            />
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                )}
 
                 {/* Add a New Custom Question */}
                 <form className="add-question-box" onSubmit={handleAddQuestion}>
@@ -333,6 +494,7 @@ function TemplateBuilderPreview() {
                         className="form-input"
                         placeholder="e.g., What song reminds you of our group?"
                         value={newPrompt}
+                        disabled={isSaving}
                         onChange={(e) => setNewPrompt(e.target.value)}
                       />
                     </div>
@@ -345,6 +507,7 @@ function TemplateBuilderPreview() {
                         id="new-question-type"
                         className="form-input"
                         value={newType}
+                        disabled={isSaving}
                         onChange={(e) => setNewType(e.target.value)}
                       >
                         {QUESTION_TYPES.map((t) => (
@@ -355,18 +518,48 @@ function TemplateBuilderPreview() {
                       </select>
                     </div>
                   </div>
-                  <Button type="submit" variant="secondary" size="sm">
+
+                  {newType === 'multiple_choice' && (
+                    <div className="form-group">
+                      <label htmlFor="new-question-options" className="form-label">
+                        Multiple choice options (comma-separated)
+                      </label>
+                      <input
+                        id="new-question-options"
+                        type="text"
+                        className="form-input"
+                        placeholder="Option 1, Option 2, Option 3"
+                        value={newOptionsText}
+                        disabled={isSaving}
+                        onChange={(e) => setNewOptionsText(e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  <Button type="submit" variant="secondary" size="sm" disabled={isSaving}>
                     + Add Question to Page
                   </Button>
                 </form>
               </div>
 
               <div className="builder-card__footer">
-                <Button to="/create" variant="ghost">
+                <Button variant="ghost" onClick={handleCancel} disabled={isSaving}>
                   Cancel
                 </Button>
-                <Button variant="primary" size="lg" onClick={handlePreviewSave}>
-                  Save Slam Book (Preview)
+                <Button
+                  variant="secondary"
+                  onClick={() => handleSaveBook('draft')}
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'Saving...' : 'Save as Draft'}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="lg"
+                  onClick={() => handleSaveBook(bookStatus)}
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'Saving to Shelf...' : 'Save Slam Book'}
                 </Button>
               </div>
             </div>
@@ -381,8 +574,11 @@ function TemplateBuilderPreview() {
                 <div className="live-preview-card__stickers" aria-hidden="true">
                   <HeartSticker size={20} />
                   <FlowerSticker size={20} />
+                  <StarSticker size={20} />
                 </div>
-                <span className="live-preview-card__eyebrow">Live Friend View Preview</span>
+                <span className="live-preview-card__eyebrow">
+                  Live Preview &bull; {bookStatus === 'published' ? 'Published' : 'Draft'}
+                </span>
                 <h2 className="live-preview-card__title">
                   {bookTitle || 'Untitled Slam Book'}
                 </h2>
@@ -392,20 +588,24 @@ function TemplateBuilderPreview() {
               </div>
 
               <div className="live-preview-card__sheet">
-                {questions.slice(0, 5).map((q, idx) => (
+                {questions.slice(0, 6).map((q, idx) => (
                   <div key={q.id} className="live-preview-field">
                     <span className="live-preview-field__label">
-                      {idx + 1}. {q.prompt}
+                      {idx + 1}. {q.text || 'Untitled question'}
                     </span>
                     <div className="live-preview-field__line" aria-hidden="true">
-                      Friend&rsquo;s handwritten-style answer goes here...
+                      {q.type === 'multiple_choice' && Array.isArray(q.options)
+                        ? `Choices: ${q.options.filter(Boolean).join(' / ')}`
+                        : q.type === 'date'
+                        ? 'DD / MM / YYYY'
+                        : 'Friend’s handwritten-style answer goes here...'}
                     </div>
                   </div>
                 ))}
 
-                {questions.length > 5 && (
+                {questions.length > 6 && (
                   <p className="live-preview-more">
-                    + {questions.length - 5} more questions in this slam book
+                    + {questions.length - 6} more questions in this slam book
                   </p>
                 )}
               </div>

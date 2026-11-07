@@ -1,29 +1,21 @@
 /**
  * ============================================================================
- * SLAMLY — FUTURE FIREBASE & PDF SERVICE ARCHITECTURE PLACEHOLDER
+ * SLAMLY — FIREBASE SERVICE ROADMAP NOTES
  * ============================================================================
- * Per Milestone 1 requirements:
- * - Firebase Authentication, Cloud Firestore, Firebase Storage, and jsPDF are
- *   intentionally NOT initialized in Milestone 1.
- * - No credentials, API keys, or fake localStorage databases are used here.
- *
- * Planned Milestone 2+ Integration Map:
- * 1. `authService`: Firebase Auth (`createUserWithEmailAndPassword`,
- *    `signInWithEmailAndPassword`, `onAuthStateChanged`).
- * 2. `bookService`: Cloud Firestore (`books/{bookId}` owned by `ownerUid`,
- *    public share lookup via unguessable `shareToken`).
- * 3. `responseService`: Cloud Firestore (`books/{bookId}/responses/{respId}`)
- *    where friends can create a response without an account if `book.isOpen`,
- *    while only `ownerUid` can read/edit/delete responses.
- * 4. `pdfExportService`: `jsPDF` generator formatting pages into a printable
- *    scrapbook keepsake PDF.
+ * - Milestone 1 (Complete): Frontend foundation & scrapbook design system.
+ * - Milestone 2 (Complete): Firebase Authentication is now implemented in:
+ *     - `src/firebase/firebase.js`
+ *     - `src/firebase/authErrors.js`
+ *     - `src/context/AuthContext.jsx`
+ * - Milestone 3 (Upcoming): Cloud Firestore book & question persistence.
+ * - Milestone 4 (Upcoming): Public shareable links & friend response collection.
+ * - Milestone 5 (Upcoming): jsPDF keepsake export.
  * ============================================================================
  */
 
 export const MILESTONE_STATUS = {
-  currentMilestone: 1,
-  mode: 'FRONTEND_PREVIEW_ONLY',
-  firebaseConnected: false,
-  note: 'Preview mode: no real account or database record is created in Milestone 1.',
+  currentMilestone: 2,
+  mode: 'FIREBASE_AUTH_ENABLED',
+  firebaseAuthConnected: true,
+  firestoreConnected: false,
 };
-

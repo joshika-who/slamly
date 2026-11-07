@@ -117,6 +117,7 @@ export const BOOK_TEMPLATES = [
     description:
       'Capture nicknames, first impressions, inside jokes, song dedications, and the moments you never want to forget.',
     coverColor: '#FAD2DD',
+    coverTheme: 'pink',
     tapeClass: '',
     defaultQuestions: [
       { id: 'q1', text: 'What is your name & the nickname only we use?', type: 'short_answer', required: true },
@@ -134,6 +135,7 @@ export const BOOK_TEMPLATES = [
     description:
       'Designed for hostel mates, lab partners, and college squads before everyone heads to new cities.',
     coverColor: '#E4DAF6',
+    coverTheme: 'lavender',
     tapeClass: 'tape-lavender',
     defaultQuestions: [
       { id: 'q1', text: 'Your name, department/branch, and our favourite campus hangout spot:', type: 'short_answer', required: true },
@@ -150,6 +152,7 @@ export const BOOK_TEMPLATES = [
     description:
       'Inspired by the classic paper slam books passed under school desks during the final month of class.',
     coverColor: '#FDE0C6',
+    coverTheme: 'peach',
     tapeClass: 'tape-peach',
     defaultQuestions: [
       { id: 'q1', text: 'Your name, roll number, and birthday:', type: 'short_answer', required: true },
@@ -166,6 +169,7 @@ export const BOOK_TEMPLATES = [
     description:
       'Turn any milestone birthday into a keepsake album filled with letters, toasts, and favourite memories from guests.',
     coverColor: '#FCF0C2',
+    coverTheme: 'peach',
     tapeClass: 'tape-sage',
     defaultQuestions: [
       { id: 'q1', text: 'Your name & how many years we have known each other:', type: 'short_answer', required: true },
@@ -181,6 +185,7 @@ export const BOOK_TEMPLATES = [
     description:
       'Great for freshers, creative communities, and group retreats where everyone shares their quirks and favourites.',
     coverColor: '#D5E8DA',
+    coverTheme: 'sage',
     tapeClass: 'tape-sage',
     defaultQuestions: [
       { id: 'q1', text: 'Your name and your go-to comfort movie or show:', type: 'short_answer', required: true },

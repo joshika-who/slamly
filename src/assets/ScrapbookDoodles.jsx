@@ -76,15 +76,21 @@ export function FlowerSticker({ size = 30, fill = '#E4DAF6', className = '' }) {
 /**
  * Meaningful SVG Polaroid Illustration (includes role="img" and accessible title/alt text)
  */
-export function PolaroidIllustration({ variant = 'friends', alt = 'Illustrated polaroid memory of friends' }) {
-  return (
+export function PolaroidIllustration({
+  variant = 'friends',
+  alt,
+  caption,
+}) {
+  const accessibleLabel = alt || caption || 'Illustrated polaroid memory of friends';
+
+  const svgElement = (
     <svg
       viewBox="0 0 220 165"
       role="img"
-      aria-label={alt}
+      aria-label={accessibleLabel}
       style={{ width: '100%', height: 'auto', borderRadius: '8px', border: '2px solid #261F1C' }}
     >
-      <title>{alt}</title>
+      <title>{accessibleLabel}</title>
       {variant === 'friends' ? (
         <>
           <rect width="220" height="165" fill="#E4DAF6" />
@@ -114,6 +120,17 @@ export function PolaroidIllustration({ variant = 'friends', alt = 'Illustrated p
       )}
     </svg>
   );
+
+  if (caption) {
+    return (
+      <div className="polaroid-frame">
+        {svgElement}
+        <div className="polaroid-caption">{caption}</div>
+      </div>
+    );
+  }
+
+  return svgElement;
 }
 
 /**

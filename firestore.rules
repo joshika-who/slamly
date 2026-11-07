@@ -1,0 +1,56 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: checks if the requester is signed in via Firebase Authentication
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Helper: validates book document fields on create and update
+    function isValidBookData(data) {
+      return data.title is string
+        && data.title.trim().size() >= 1
+        && data.title.size() <= 100
+        && data.description is string
+        && data.description.size() <= 500
+        && data.coverTheme is string
+        && data.coverTheme in ['pink', 'lavender', 'peach', 'sage']
+        && data.status is string
+        && data.status in ['draft', 'published']
+        && (data.templateId == null || data.templateId is string)
+        && data.questions is list
+        && data.questions.size() <= 50;
+    }
+
+    // Top-level books collection: private to each book's owner in Milestone 3
+    match /books/{bookId} {
+      // Read: only the authenticated owner can read their own books
+      allow read: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid;
+
+      // Create: user must be signed in, set ownerId to their own UID, and pass validation
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && isValidBookData(request.resource.data);
+
+      // Update: only the owner can update, ownerId & createdAt must never change, and fields must be valid
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && isValidBookData(request.resource.data);
+
+      // Delete: only the owner can delete their own book
+      allow delete: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid;
+    }
+
+    // Default deny for everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

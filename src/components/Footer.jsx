@@ -1,9 +1,11 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { SlamlyLogoMark } from '../assets/ScrapbookDoodles';
+import { useAuth } from '../context/AuthContext';
 
 export default function Footer() {
   const currentYear = new Date().getFullYear();
+  const { user } = useAuth();
 
   return (
     <footer className="site-footer">
@@ -38,7 +40,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link to="/dashboard" className="footer-link">
-                  My Dashboard (Preview)
+                  My Dashboard
                 </Link>
               </li>
             </ul>
@@ -49,21 +51,38 @@ export default function Footer() {
               Account
             </h2>
             <ul className="footer-links">
-              <li>
-                <Link to="/login" className="footer-link">
-                  Log in
-                </Link>
-              </li>
-              <li>
-                <Link to="/signup" className="footer-link">
-                  Create Account
-                </Link>
-              </li>
-              <li>
-                <Link to="/create/blank" className="footer-link">
-                  Blank Book Studio
-                </Link>
-              </li>
+              {user ? (
+                <>
+                  <li>
+                    <Link to="/dashboard" className="footer-link">
+                      Personal Shelf ({user.displayName || user.email})
+                    </Link>
+                  </li>
+                  <li>
+                    <Link to="/create/blank" className="footer-link">
+                      Blank Book Studio
+                    </Link>
+                  </li>
+                </>
+              ) : (
+                <>
+                  <li>
+                    <Link to="/login" className="footer-link">
+                      Log in
+                    </Link>
+                  </li>
+                  <li>
+                    <Link to="/signup" className="footer-link">
+                      Create Account
+                    </Link>
+                  </li>
+                  <li>
+                    <Link to="/forgot-password" className="footer-link">
+                      Reset Password
+                    </Link>
+                  </li>
+                </>
+              )}
             </ul>
           </div>
         </div>
@@ -73,11 +92,10 @@ export default function Footer() {
             &copy; {currentYear} Slamly. Crafted with warm paper textures &amp; nostalgia.
           </span>
           <span>
-            Milestone 1 Foundation &bull; Ready for Firebase Auth &amp; Firestore
+            Milestone 3 &bull; Secured with Firebase Auth &amp; Cloud Firestore
           </span>
         </div>
       </div>
     </footer>
   );
 }
-
