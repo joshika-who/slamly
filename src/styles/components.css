@@ -2251,3 +2251,227 @@
     align-items: stretch;
   }
 }
+
+/* ==========================================================================
+   17. MILESTONE 5: RESPONSE MANAGEMENT PAGE & CARDS (/books/:bookId/responses)
+   ========================================================================== */
+
+.book-card-response-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--color-ink);
+  background: var(--pastel-lavender);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.responses-page {
+  padding: 32px 0 80px;
+}
+
+.responses-header-card {
+  position: relative;
+  padding: 28px 28px 24px;
+  margin-bottom: 24px;
+}
+
+.responses-header-card__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.responses-header-card__title {
+  font-size: clamp(1.85rem, 3.8vw, 2.5rem);
+  margin: 4px 0 6px;
+  color: var(--color-ink);
+}
+
+.responses-header-card__subtitle {
+  color: var(--color-ink-muted);
+  max-width: 620px;
+  margin: 0;
+}
+
+.responses-count-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 124px;
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--color-ink);
+  background: var(--bg-paper);
+  box-shadow: 4px 5px 0px var(--color-ink);
+  text-align: center;
+}
+
+.responses-count-box__number {
+  font-family: var(--font-heading);
+  font-size: 2.3rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-ink);
+}
+
+.responses-count-box__label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-ink-muted);
+  margin-top: 4px;
+}
+
+.responses-search-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  margin-bottom: 24px;
+}
+
+.responses-search-bar__input-wrap {
+  flex: 1;
+  min-width: 250px;
+}
+
+.responses-search-bar__meta {
+  font-size: 0.88rem;
+  color: var(--color-ink-muted);
+  padding-bottom: 6px;
+}
+
+.responses-list {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.response-keepsake-card {
+  position: relative;
+  padding: 26px 24px;
+}
+
+.response-keepsake-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+  border-bottom: 2px dashed var(--color-border-strong);
+}
+
+.response-keepsake-card__name {
+  font-size: 1.65rem;
+  margin: 0;
+  color: var(--color-ink);
+}
+
+.response-keepsake-card__date {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--color-ink-soft);
+  margin: 4px 0 0;
+}
+
+.response-keepsake-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.response-answers-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 18px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-ink);
+  background: var(--bg-lined-paper);
+}
+
+.response-answer-block {
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--color-border-strong);
+}
+
+.response-answer-block:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.response-answer-block__question {
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--color-ink);
+  margin-bottom: 4px;
+}
+
+.response-answer-block__answer {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.5;
+  color: var(--color-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.response-answer-block__empty {
+  font-style: italic;
+  color: var(--color-ink-soft);
+}
+
+.response-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.response-answers-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.response-edit-answer-item {
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-ink);
+  background: var(--bg-cream);
+}
+
+.response-keepsake-card__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1.5px dashed var(--color-border);
+}
+
+.responses-load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 28px;
+}
+
+@media (max-width: 640px) {
+  .responses-header-card {
+    padding: 22px 16px;
+  }
+
+  .response-keepsake-card {
+    padding: 20px 16px;
+  }
+}

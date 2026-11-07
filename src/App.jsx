@@ -13,6 +13,7 @@ import CreateBook from './pages/CreateBook';
 import TemplateBuilderPreview from './pages/TemplateBuilderPreview';
 import BlankBuilderPreview from './pages/BlankBuilderPreview';
 import EditBook from './pages/EditBook';
+import BookResponses from './pages/BookResponses';
 import PublicBook from './pages/PublicBook';
 import NotFound from './pages/NotFound';
 
@@ -65,6 +66,7 @@ function App() {
               <Route path="/create/template/:id" element={<TemplateBuilderPreview />} />
               <Route path="/create/blank" element={<BlankBuilderPreview />} />
               <Route path="/books/:bookId/edit" element={<EditBook />} />
+              <Route path="/books/:bookId/responses" element={<BookResponses />} />
             </Route>
 
             {/* Public 404 fallback */}

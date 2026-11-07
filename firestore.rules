@@ -31,7 +31,7 @@ service cloud.firestore {
         && data.questions.size() <= 50;
     }
 
-    // Helper: validates a friend response submission on create
+    // Helper: validates a friend response submission on CREATE
     // Note: Firestore Rules cannot loop over dynamic list items, so per-answer character
     // limits (1000 chars) are enforced in the client, with Firestore's 1 MiB document size
     // limit acting as the hard server cap.
@@ -44,6 +44,20 @@ service cloud.firestore {
         && data.answers is list
         && data.answers.size() <= 50
         && data.createdAt == request.time;
+    }
+
+    // Helper: validates an owner edit to an existing response on UPDATE
+    // Ensures keys remain strictly respondentName, answers, and createdAt,
+    // and that createdAt is never modified.
+    function isValidResponseUpdate(newData, existingData) {
+      return newData.keys().hasOnly(['respondentName', 'answers', 'createdAt'])
+        && newData.keys().hasAll(['respondentName', 'answers', 'createdAt'])
+        && newData.createdAt == existingData.createdAt
+        && newData.respondentName is string
+        && newData.respondentName.trim().size() >= 1
+        && newData.respondentName.size() <= 50
+        && newData.answers is list
+        && newData.answers.size() <= 50;
     }
 
     // Top-level books collection
@@ -84,8 +98,9 @@ service cloud.firestore {
         // Read & Delete: restricted strictly to the parent book's owner
         allow read, delete: if isBookOwner(bookId);
 
-        // Update: responses are immutable keepsakes; nobody can update a response
-        allow update: if false;
+        // Update: allowed ONLY for the parent book's owner, preserving createdAt and valid fields
+        allow update: if isBookOwner(bookId)
+          && isValidResponseUpdate(request.resource.data, resource.data);
       }
     }
 

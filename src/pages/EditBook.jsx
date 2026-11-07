@@ -442,6 +442,15 @@ function EditBook() {
             </div>
 
             <div className="book-status-actions">
+              <Button
+                to={`/books/${bookId}/responses`}
+                variant="secondary"
+                size="sm"
+                disabled={isSaving}
+              >
+                View Responses
+              </Button>
+
               {savedStatus === 'draft' && (
                 <Button
                   variant="primary"

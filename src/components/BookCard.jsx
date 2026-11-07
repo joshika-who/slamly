@@ -51,15 +51,18 @@ async function copyTextToClipboard(text) {
  * Reusable BookCard component displaying a user's saved slam book from Cloud Firestore.
  * Supports:
  * - Status display ("draft", "published", "closed") with plain-language explanation.
+ * - Lazy-loaded response count with loading placeholder and graceful fallback.
  * - Quick status transitions via `onStatusChange(book, nextStatus)` (which calls `updateBook`).
  * - Copyable public share link (`${window.location.origin}/s/${book.id}`) shown only when published.
- * - Edit and Delete actions.
+ * - View Responses (`/books/:bookId/responses`), Edit Book (`/books/:bookId/edit`), and Delete actions.
  */
 export default function BookCard({
   book,
   onDeleteRequest,
   onStatusChange,
   isUpdatingStatus = false,
+  responseCount,
+  isLoadingResponseCount = false,
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -84,6 +87,13 @@ export default function BookCard({
       // Fallback: ignore if clipboard access is denied
     }
   };
+
+  let responseCountText = 'Responses —';
+  if (isLoadingResponseCount) {
+    responseCountText = 'Loading responses...';
+  } else if (typeof responseCount === 'number') {
+    responseCountText = `${responseCount} ${responseCount === 1 ? 'Response' : 'Responses'}`;
+  }
 
   return (
     <article className="book-card" aria-label={book.title}>
@@ -162,8 +172,9 @@ export default function BookCard({
         <div
           style={{
             display: 'flex',
-            gap: '12px',
+            gap: '10px',
             flexWrap: 'wrap',
+            alignItems: 'center',
             marginTop: 'auto',
             paddingTop: '8px',
             fontSize: '0.86rem',
@@ -173,6 +184,10 @@ export default function BookCard({
         >
           <span>
             {questionCount} {questionCount === 1 ? 'Question' : 'Questions'}
+          </span>
+          <span>&bull;</span>
+          <span className="book-card-response-pill" aria-live="polite">
+            {responseCountText}
           </span>
           <span>&bull;</span>
           <span>{book.templateId ? `Template: ${book.templateId}` : 'Blank Custom'}</span>
@@ -261,14 +276,24 @@ export default function BookCard({
       </div>
 
       <div className="book-card-footer">
-        <Button
-          to={`/books/${book.id}/edit`}
-          variant="secondary"
-          size="sm"
-          disabled={isUpdatingStatus}
-        >
-          Edit Book
-        </Button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          <Button
+            to={`/books/${book.id}/responses`}
+            variant="primary"
+            size="sm"
+            disabled={isUpdatingStatus}
+          >
+            View Responses
+          </Button>
+          <Button
+            to={`/books/${book.id}/edit`}
+            variant="secondary"
+            size="sm"
+            disabled={isUpdatingStatus}
+          >
+            Edit Book
+          </Button>
+        </div>
 
         <Button
           variant="ghost"

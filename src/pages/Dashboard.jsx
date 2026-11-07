@@ -4,6 +4,7 @@ import Button from '../components/Button';
 import BookCard from '../components/BookCard';
 import { useAuth } from '../context/AuthContext';
 import { deleteBook, getUserBooks, updateBook } from '../services/bookService';
+import { getResponseCount } from '../services/responseService';
 import {
   FlowerSticker,
   HeartSticker,
@@ -15,10 +16,12 @@ import {
  * Dashboard Page (/dashboard)
  * Displays the authenticated user's real slam books from Cloud Firestore (`books/{bookId}`):
  * - Queries only books where `ownerId == user.uid`, ordered newest first.
- * - Shows title, cover theme, status ("published", "closed", or "draft"), question count, and creation date.
+ * - Lazily loads each book's response count using `getResponseCount` after the books appear
+ *   (each count is fetched independently so a single failed count never breaks the dashboard).
  * - Lets the owner publish drafts, close/reopen published books, move books back to draft,
  *   and copy the public share link (`/s/:bookId`) for published books.
- * - Provides Edit (`/books/:bookId/edit`) and Delete (which deletes all responses in batches and then the book).
+ * - Provides View Responses (`/books/:bookId/responses`), Edit (`/books/:bookId/edit`),
+ *   and Delete (which deletes all responses in batches and then the book).
  */
 function Dashboard() {
   const navigate = useNavigate();
@@ -37,6 +40,10 @@ function Dashboard() {
   const [fetchError, setFetchError] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
 
+  // Lazy-loaded response counts per bookId
+  const [responseCounts, setResponseCounts] = useState({});
+  const [loadingCounts, setLoadingCounts] = useState({});
+
   const [flashMessage, setFlashMessage] = useState(location.state?.flashMessage || '');
   const [statusError, setStatusError] = useState('');
   const [updatingBookId, setUpdatingBookId] = useState(null);
@@ -54,6 +61,26 @@ function Dashboard() {
     try {
       const userBooks = await getUserBooks(user.uid);
       setBooks(userBooks);
+
+      // Initialize loading state for each book's response count
+      const initialLoadingMap = {};
+      userBooks.forEach((b) => {
+        initialLoadingMap[b.id] = true;
+      });
+      setLoadingCounts(initialLoadingMap);
+
+      // Lazily load each book's response count in the background without blocking books display.
+      // Each book count is handled independently so one failure never breaks the dashboard.
+      userBooks.forEach(async (b) => {
+        try {
+          const count = await getResponseCount(user.uid, b.id);
+          setResponseCounts((prev) => ({ ...prev, [b.id]: count }));
+        } catch {
+          setResponseCounts((prev) => ({ ...prev, [b.id]: null }));
+        } finally {
+          setLoadingCounts((prev) => ({ ...prev, [b.id]: false }));
+        }
+      });
     } catch (error) {
       setFetchError(
         error.message || 'Could not load your slam books from Cloud Firestore.'
@@ -124,8 +151,14 @@ function Dashboard() {
 
     try {
       await deleteBook(user.uid, bookToDelete.id);
+      const deletedId = bookToDelete.id;
       const deletedTitle = bookToDelete.title;
-      setBooks((prev) => prev.filter((b) => b.id !== bookToDelete.id));
+      setBooks((prev) => prev.filter((b) => b.id !== deletedId));
+      setResponseCounts((prev) => {
+        const next = { ...prev };
+        delete next[deletedId];
+        return next;
+      });
       setBookToDelete(null);
       setFlashMessage(
         `Deleted "${deletedTitle}" and all of its friend responses from your shelf.`
@@ -193,7 +226,8 @@ function Dashboard() {
               </h1>
               <p className="dashboard-header__subtitle">
                 Create, customise, and share your personal digital slam books. Publish a book to get
-                its public share link, or close it anytime when you are done collecting responses.
+                its public share link, or open <strong>View Responses</strong> on any book to read
+                and manage pages signed by your friends.
               </p>
             </div>
 
@@ -235,19 +269,6 @@ function Dashboard() {
             </div>
           </div>
         </header>
-
-        {/* Milestone 4 Info Note: Responses viewing coming in Milestone 5 */}
-        <div
-          className="preview-inline-notice"
-          style={{ marginBottom: '24px' }}
-          role="note"
-        >
-          <p style={{ margin: 0 }}>
-            <strong>Friend Responses:</strong> When your book is <strong>Published</strong>, friends
-            can submit pages using your share link without needing an account. Responses are stored
-            privately under your book and will be viewable here in the next update.
-          </p>
-        </div>
 
         {/* My Slam Books Section */}
         <section className="dashboard-books-section" aria-labelledby="my-books-heading">
@@ -358,6 +379,8 @@ function Dashboard() {
                   onDeleteRequest={handleRequestDelete}
                   onStatusChange={handleStatusChange}
                   isUpdatingStatus={updatingBookId === book.id}
+                  responseCount={responseCounts[book.id]}
+                  isLoadingResponseCount={Boolean(loadingCounts[book.id])}
                 />
               ))}
             </div>

@@ -1,6 +1,19 @@
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getCountFromServer,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  serverTimestamp,
+  startAfter,
+  updateDoc,
+} from 'firebase/firestore';
 import { db } from '../firebase/firestore';
-import { isFirebaseConfigured } from '../firebase/firebase';
+import { auth, isFirebaseConfigured } from '../firebase/firebase';
 
 const BOOKS_COLLECTION = 'books';
 const RESPONSES_SUBCOLLECTION = 'responses';
@@ -8,13 +21,14 @@ const RESPONSES_SUBCOLLECTION = 'responses';
 export const MAX_RESPONDENT_NAME_LENGTH = 50;
 export const MAX_ANSWER_LENGTH = 1000;
 export const MAX_ANSWERS_COUNT = 50;
+export const DEFAULT_RESPONSE_PAGE_SIZE = 25;
 
 /**
- * Converts Firestore errors during response submission into friendly messages for friends.
+ * Converts Firestore errors into friendly messages for friends and book owners.
  */
 export function getFriendlyResponseError(
   error,
-  fallbackMessage = 'Could not send your response right now. Please try again.'
+  fallbackMessage = 'Something went wrong while communicating with Cloud Firestore.'
 ) {
   if (!error) return fallbackMessage;
 
@@ -26,16 +40,90 @@ export function getFriendlyResponseError(
 
   switch (code) {
     case 'permission-denied':
-      return 'This slam book is no longer accepting responses, or the link is no longer active.';
+      return 'Permission denied by Cloud Firestore. Make sure you are signed in as the book owner (or that the book is published) and that the latest firestore.rules are published.';
+    case 'not-found':
+      return 'The requested response could not be found.';
     case 'unavailable':
-      return 'Network error: Could not reach Cloud Firestore. Please check your internet connection and try again.';
+      return 'Network error: Cloud Firestore is temporarily unreachable. Please check your internet connection and try again.';
+    case 'failed-precondition':
+      return 'Firestore requires an index for this query. Open the browser developer console (F12) and click the Firebase index creation link.';
+    case 'unauthenticated':
+      return 'You must be logged in to manage slam book responses.';
     default:
       return error.message || fallbackMessage;
   }
 }
 
 /**
- * Validates and normalizes a friend's response before writing to Firestore.
+ * Ensures Firestore is configured and an authenticated owner UID is available.
+ */
+function assertOwnerAndBook(userId, bookId) {
+  if (!isFirebaseConfigured || !db) {
+    const err = new Error('Cloud Firestore is not configured. Please check your .env.local file.');
+    err.isValidationError = true;
+    throw err;
+  }
+
+  const resolvedUserId =
+    typeof userId === 'string' && userId.trim()
+      ? userId.trim()
+      : auth?.currentUser?.uid || '';
+
+  if (!resolvedUserId) {
+    const err = new Error('You must be logged in to view or manage slam book responses.');
+    err.code = 'unauthenticated';
+    err.isValidationError = true;
+    throw err;
+  }
+
+  const cleanBookId = typeof bookId === 'string' ? bookId.trim() : '';
+  if (!cleanBookId) {
+    const err = new Error('A valid slam book ID is required.');
+    err.isValidationError = true;
+    throw err;
+  }
+
+  return { userId: resolvedUserId, bookId: cleanBookId };
+}
+
+/**
+ * Normalizes a Firestore response DocumentSnapshot into a clean JS object for owner UI cards.
+ */
+function formatResponseDoc(docSnap) {
+  const data = docSnap.data();
+  const createdAtDate = data.createdAt?.toDate ? data.createdAt.toDate() : null;
+
+  const normalizedAnswers = Array.isArray(data.answers)
+    ? data.answers.map((item, idx) => ({
+        questionId: item?.questionId ? String(item.questionId) : `q_${idx}`,
+        question: typeof item?.question === 'string' ? item.question : `Question #${idx + 1}`,
+        answer: typeof item?.answer === 'string' ? item.answer : '',
+      }))
+    : [];
+
+  return {
+    id: docSnap.id,
+    respondentName:
+      typeof data.respondentName === 'string' && data.respondentName.trim()
+        ? data.respondentName.trim()
+        : 'Anonymous Friend',
+    answers: normalizedAnswers,
+    createdAt: data.createdAt || null,
+    createdAtMillis: createdAtDate ? createdAtDate.getTime() : 0,
+    formattedDate: createdAtDate
+      ? createdAtDate.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+      : 'Just now',
+  };
+}
+
+/**
+ * Validates and normalizes a friend's response before writing to or updating in Firestore.
  * Can be called with either:
  *   - `questions` (the book's questions array) + `rawAnswersById` (map of questionId -> string)
  *   - OR a pre-built `answers` array `[{ questionId, question, answer }]`
@@ -49,7 +137,7 @@ export function validateResponsePayload({
   const cleanedName = typeof respondentName === 'string' ? respondentName.trim() : '';
 
   if (!cleanedName) {
-    const err = new Error('Please enter your name or nickname before submitting.');
+    const err = new Error('Please enter a name or nickname (1 to 50 characters).');
     err.isValidationError = true;
     err.field = 'respondentName';
     throw err;
@@ -57,7 +145,7 @@ export function validateResponsePayload({
 
   if (cleanedName.length > MAX_RESPONDENT_NAME_LENGTH) {
     const err = new Error(
-      `Your name or nickname must be ${MAX_RESPONDENT_NAME_LENGTH} characters or fewer.`
+      `Name or nickname must be ${MAX_RESPONDENT_NAME_LENGTH} characters or fewer.`
     );
     err.isValidationError = true;
     err.field = 'respondentName';
@@ -121,7 +209,7 @@ export function validateResponsePayload({
       const questionText =
         typeof item?.question === 'string' && item.question.trim()
           ? item.question.trim()
-          : (matchedQuestion?.text || matchedQuestion?.prompt || '').trim();
+          : (matchedQuestion?.text || matchedQuestion?.prompt || `Question #${index + 1}`).trim();
       const answerText = typeof item?.answer === 'string' ? item.answer.trim() : '';
 
       if (matchedQuestion?.required && !answerText) {
@@ -161,8 +249,9 @@ export function validateResponsePayload({
 }
 
 /**
- * createResponse(bookId, data)
- * Stores a friend's response in `books/{bookId}/responses/{responseId}` using an auto-generated ID.
+ * 1. createResponse(bookId, data)
+ * Public submission function: stores a friend's response in `books/{bookId}/responses/{responseId}`
+ * using an auto-generated ID.
  * - Requires no authentication (friends can respond without an account).
  * - Silently ignores submissions where the hidden honeypot field is filled.
  * - Saves `respondentName`, `answers` ([{ questionId, question, answer }]), and `createdAt` (serverTimestamp).
@@ -208,7 +297,196 @@ export async function createResponse(bookId, data = {}) {
       answers: validated.answers,
     };
   } catch (error) {
-    throw new Error(getFriendlyResponseError(error));
+    if (error?.code === 'permission-denied') {
+      throw new Error('This slam book is no longer accepting responses, or the link is no longer active.');
+    }
+    throw new Error(
+      getFriendlyResponseError(error, 'Could not send your response right now. Please try again.')
+    );
   }
 }
 
+/**
+ * 2. getBookResponses(userId, bookId, { pageSize = 25, cursor = null })
+ *    (Also supports calling as `getBookResponses(bookId, { pageSize, cursor })`)
+ * Owner-only function: fetches a paginated page of responses from `books/{bookId}/responses`,
+ * ordered newest first (`createdAt desc`), 25 per page by default.
+ * Returns `{ responses, cursor, nextCursor, hasMore }`.
+ */
+export async function getBookResponses(arg1, arg2, arg3) {
+  let rawUserId;
+  let rawBookId;
+  let options;
+
+  if (typeof arg2 === 'string') {
+    rawUserId = arg1;
+    rawBookId = arg2;
+    options = arg3 || {};
+  } else {
+    rawUserId = auth?.currentUser?.uid;
+    rawBookId = arg1;
+    options = arg2 || {};
+  }
+
+  const { bookId } = assertOwnerAndBook(rawUserId, rawBookId);
+  const pageSize =
+    typeof options.pageSize === 'number' && options.pageSize > 0
+      ? Math.min(options.pageSize, 100)
+      : DEFAULT_RESPONSE_PAGE_SIZE;
+  const cursor = options.cursor || null;
+
+  try {
+    const responsesRef = collection(db, BOOKS_COLLECTION, bookId, RESPONSES_SUBCOLLECTION);
+
+    // Fetch pageSize + 1 documents so we know whether another page exists after this one
+    const constraints = [orderBy('createdAt', 'desc')];
+    if (cursor) {
+      constraints.push(startAfter(cursor));
+    }
+    constraints.push(limit(pageSize + 1));
+
+    const responsesQuery = query(responsesRef, ...constraints);
+    const snapshot = await getDocs(responsesQuery);
+
+    const hasMore = snapshot.docs.length > pageSize;
+    const pageDocs = hasMore ? snapshot.docs.slice(0, pageSize) : snapshot.docs;
+    const nextCursor = hasMore && pageDocs.length > 0 ? pageDocs[pageDocs.length - 1] : null;
+
+    return {
+      responses: pageDocs.map(formatResponseDoc),
+      cursor: nextCursor,
+      nextCursor,
+      hasMore,
+    };
+  } catch (error) {
+    throw new Error(
+      getFriendlyResponseError(error, 'Could not load responses for this slam book.')
+    );
+  }
+}
+
+/**
+ * 3. getResponseCount(userId, bookId)
+ *    (Also supports calling as `getResponseCount(bookId)`)
+ * Owner-only function: returns the total number of responses in `books/{bookId}/responses`
+ * using Firestore's `getCountFromServer`.
+ */
+export async function getResponseCount(arg1, arg2) {
+  const rawUserId = typeof arg2 === 'string' ? arg1 : auth?.currentUser?.uid;
+  const rawBookId = typeof arg2 === 'string' ? arg2 : arg1;
+
+  const { bookId } = assertOwnerAndBook(rawUserId, rawBookId);
+
+  try {
+    const responsesRef = collection(db, BOOKS_COLLECTION, bookId, RESPONSES_SUBCOLLECTION);
+    const countSnapshot = await getCountFromServer(responsesRef);
+    return countSnapshot.data().count;
+  } catch (error) {
+    throw new Error(
+      getFriendlyResponseError(error, 'Could not load the response count for this slam book.')
+    );
+  }
+}
+
+/**
+ * 4. updateResponse(userId, bookId, responseId, changes)
+ *    (Also supports calling as `updateResponse(bookId, responseId, changes)`)
+ * Owner-only function: updates `respondentName` and `answers` on an existing response.
+ * Explicitly prevents modifying `createdAt` or adding any extra keys.
+ */
+export async function updateResponse(arg1, arg2, arg3, arg4) {
+  let rawUserId;
+  let rawBookId;
+  let rawResponseId;
+  let changes;
+
+  if (typeof arg3 === 'string') {
+    rawUserId = arg1;
+    rawBookId = arg2;
+    rawResponseId = arg3;
+    changes = arg4 || {};
+  } else {
+    rawUserId = auth?.currentUser?.uid;
+    rawBookId = arg1;
+    rawResponseId = arg2;
+    changes = arg3 || {};
+  }
+
+  const { bookId } = assertOwnerAndBook(rawUserId, rawBookId);
+
+  const cleanResponseId = typeof rawResponseId === 'string' ? rawResponseId.trim() : '';
+  if (!cleanResponseId) {
+    const err = new Error('A valid response ID is required to save changes.');
+    err.isValidationError = true;
+    throw err;
+  }
+
+  try {
+    // Validate respondentName (1–50 chars) and answers (<= 50 items, each <= 1000 chars)
+    const validated = validateResponsePayload({
+      respondentName: changes.respondentName,
+      answers: changes.answers,
+    });
+
+    // Only respondentName and answers can ever be updated; createdAt is preserved untouched
+    const updatePayload = {
+      respondentName: validated.respondentName,
+      answers: validated.answers,
+    };
+
+    const responseRef = doc(
+      db,
+      BOOKS_COLLECTION,
+      bookId,
+      RESPONSES_SUBCOLLECTION,
+      cleanResponseId
+    );
+    await updateDoc(responseRef, updatePayload);
+
+    return {
+      id: cleanResponseId,
+      respondentName: validated.respondentName,
+      answers: validated.answers,
+    };
+  } catch (error) {
+    throw new Error(
+      getFriendlyResponseError(error, 'Could not save changes to this response.')
+    );
+  }
+}
+
+/**
+ * 5. deleteResponse(userId, bookId, responseId)
+ *    (Also supports calling as `deleteResponse(bookId, responseId)`)
+ * Owner-only function: permanently deletes a single response from `books/{bookId}/responses/{responseId}`.
+ */
+export async function deleteResponse(arg1, arg2, arg3) {
+  const rawUserId = typeof arg3 === 'string' ? arg1 : auth?.currentUser?.uid;
+  const rawBookId = typeof arg3 === 'string' ? arg2 : arg1;
+  const rawResponseId = typeof arg3 === 'string' ? arg3 : arg2;
+
+  const { bookId } = assertOwnerAndBook(rawUserId, rawBookId);
+
+  const cleanResponseId = typeof rawResponseId === 'string' ? rawResponseId.trim() : '';
+  if (!cleanResponseId) {
+    const err = new Error('A valid response ID is required to delete a response.');
+    err.isValidationError = true;
+    throw err;
+  }
+
+  try {
+    const responseRef = doc(
+      db,
+      BOOKS_COLLECTION,
+      bookId,
+      RESPONSES_SUBCOLLECTION,
+      cleanResponseId
+    );
+    await deleteDoc(responseRef);
+    return true;
+  } catch (error) {
+    throw new Error(
+      getFriendlyResponseError(error, 'Could not delete this response.')
+    );
+  }
+}
