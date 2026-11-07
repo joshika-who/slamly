@@ -10,8 +10,6 @@ import {
 /**
  * Privacy Page (/privacy)
  * Plain-language privacy summary for Slamly.
- * Uses explicit placeholders ([YOUR NAME], [CONTACT EMAIL], [LAST UPDATED DATE])
- * rather than invented company names, addresses, or dates.
  */
 function Privacy() {
   return (

@@ -10,8 +10,6 @@ import {
 /**
  * Terms Page (/terms)
  * Plain-language terms of use for Slamly.
- * Uses explicit placeholders ([YOUR NAME], [CONTACT EMAIL], [LAST UPDATED DATE])
- * rather than invented company names, addresses, or dates.
  */
 function Terms() {
   return (
@@ -33,7 +31,7 @@ function Terms() {
             <span className="badge badge--lavender">Terms of Use</span>
             <h1 className="legal-card__title">Terms of Use</h1>
             <p className="legal-card__updated">
-              Last updated: <strong>[LAST UPDATED DATE]</strong>
+              Last updated: <strong>08-11-2026</strong>
             </p>
           </header>
 
@@ -85,8 +83,8 @@ function Terms() {
             <section className="legal-section" aria-labelledby="terms-contact-heading">
               <h2 id="terms-contact-heading">5. Contact</h2>
               <p>
-                Slamly is operated by <strong>[YOUR NAME]</strong>. To report abuse or ask a
-                question about these terms, email <strong>[CONTACT EMAIL]</strong>. You can also
+                Slamly is operated by <strong>Kotagiri Joshika</strong>. To report abuse or ask a
+                question about these terms, email <strong>kotagirijoshika@gmail.com</strong>. You can also
                 read our <Link to="/privacy">Privacy summary</Link>.
               </p>
             </section>
