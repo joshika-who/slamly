@@ -13,6 +13,7 @@ import CreateBook from './pages/CreateBook';
 import TemplateBuilderPreview from './pages/TemplateBuilderPreview';
 import BlankBuilderPreview from './pages/BlankBuilderPreview';
 import EditBook from './pages/EditBook';
+import PublicBook from './pages/PublicBook';
 import NotFound from './pages/NotFound';
 
 /**
@@ -33,8 +34,9 @@ function ScrollToTop() {
 
 /**
  * Root Application Component
- * Wraps the app in AuthProvider and defines public, public-only (auth),
- * and protected routes inside the shared MainLayout.
+ * Wraps the app in AuthProvider and defines:
+ * - Minimal public share route (/s/:bookId) with no login required and no dashboard navigation.
+ * - MainLayout routes: public landing page, public-only auth routes, and protected owner routes.
  */
 function App() {
   return (
@@ -42,6 +44,9 @@ function App() {
       <BrowserRouter>
         <ScrollToTop />
         <Routes>
+          {/* Public share link route: minimal layout (logo + form only, no login required) */}
+          <Route path="/s/:bookId" element={<PublicBook />} />
+
           <Route element={<MainLayout />}>
             {/* Public landing page */}
             <Route path="/" element={<Home />} />

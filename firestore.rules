@@ -8,6 +8,13 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Helper: checks if the signed-in user owns the parent book document
+    function isBookOwner(bookId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/books/$(bookId))
+        && get(/databases/$(database)/documents/books/$(bookId)).data.ownerId == request.auth.uid;
+    }
+
     // Helper: validates book document fields on create and update
     function isValidBookData(data) {
       return data.title is string
@@ -18,16 +25,36 @@ service cloud.firestore {
         && data.coverTheme is string
         && data.coverTheme in ['pink', 'lavender', 'peach', 'sage']
         && data.status is string
-        && data.status in ['draft', 'published']
+        && data.status in ['draft', 'published', 'closed']
         && (data.templateId == null || data.templateId is string)
         && data.questions is list
         && data.questions.size() <= 50;
     }
 
-    // Top-level books collection: private to each book's owner in Milestone 3
+    // Helper: validates a friend response submission on create
+    // Note: Firestore Rules cannot loop over dynamic list items, so per-answer character
+    // limits (1000 chars) are enforced in the client, with Firestore's 1 MiB document size
+    // limit acting as the hard server cap.
+    function isValidResponseData(data) {
+      return data.keys().hasOnly(['respondentName', 'answers', 'createdAt'])
+        && data.keys().hasAll(['respondentName', 'answers', 'createdAt'])
+        && data.respondentName is string
+        && data.respondentName.trim().size() >= 1
+        && data.respondentName.size() <= 50
+        && data.answers is list
+        && data.answers.size() <= 50
+        && data.createdAt == request.time;
+    }
+
+    // Top-level books collection
     match /books/{bookId} {
-      // Read: only the authenticated owner can read their own books
-      allow read: if isSignedIn()
+      // Single-document read (get): allowed for the book owner OR anyone if the book is "published" or "closed"
+      allow get: if (isSignedIn() && resource.data.ownerId == request.auth.uid)
+        || resource.data.status in ['published', 'closed'];
+
+      // Collection queries (list): ONLY allowed for the authenticated owner of those books.
+      // Public list queries are never allowed so published books cannot be browsed or enumerated.
+      allow list: if isSignedIn()
         && resource.data.ownerId == request.auth.uid;
 
       // Create: user must be signed in, set ownerId to their own UID, and pass validation
@@ -45,6 +72,21 @@ service cloud.firestore {
       // Delete: only the owner can delete their own book
       allow delete: if isSignedIn()
         && resource.data.ownerId == request.auth.uid;
+
+      // Subcollection: friend responses for a specific slam book
+      match /responses/{responseId} {
+        // Create: allowed for anyone (signed in or not) ONLY if the parent book exists
+        // and its status is currently "published", and the response payload is valid.
+        allow create: if exists(/databases/$(database)/documents/books/$(bookId))
+          && get(/databases/$(database)/documents/books/$(bookId)).data.status == 'published'
+          && isValidResponseData(request.resource.data);
+
+        // Read & Delete: restricted strictly to the parent book's owner
+        allow read, delete: if isBookOwner(bookId);
+
+        // Update: responses are immutable keepsakes; nobody can update a response
+        allow update: if false;
+      }
     }
 
     // Default deny for everything else
@@ -53,4 +95,3 @@ service cloud.firestore {
     }
   }
 }
-

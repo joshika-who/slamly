@@ -4,6 +4,7 @@ import Button from '../components/Button';
 import { useAuth } from '../context/AuthContext';
 import { BOOK_TEMPLATES } from '../data/mockBooks';
 import {
+  BOOK_STATUS_META,
   cloneTemplateQuestions,
   createBook,
   createQuestionId,
@@ -174,6 +175,13 @@ function TemplateBuilderPreview() {
   const handleQuestionTextChange = (questionId, updatedText) => {
     setQuestions((prev) =>
       prev.map((q) => (q.id === questionId ? { ...q, text: updatedText } : q))
+    );
+    setIsDirty(true);
+  };
+
+  const handleQuestionRequiredChange = (questionId, isRequired) => {
+    setQuestions((prev) =>
+      prev.map((q) => (q.id === questionId ? { ...q, required: Boolean(isRequired) } : q))
     );
     setIsDirty(true);
   };
@@ -360,9 +368,13 @@ function TemplateBuilderPreview() {
                       setIsDirty(true);
                     }}
                   >
-                    <option value="published">Published (Ready on my shelf)</option>
-                    <option value="draft">Draft (Still working on questions)</option>
+                    <option value="published">Published (Public link open for friend responses)</option>
+                    <option value="draft">Draft (Private — only visible to you)</option>
+                    <option value="closed">Closed (Public link shows responses are closed)</option>
                   </select>
+                  <span className="form-hint">
+                    {(BOOK_STATUS_META[bookStatus] || BOOK_STATUS_META.draft).shortNote}
+                  </span>
                 </div>
               </div>
 
@@ -407,6 +419,18 @@ function TemplateBuilderPreview() {
                               </option>
                             ))}
                           </select>
+
+                          <label className="question-required-toggle">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(question.required)}
+                              disabled={isSaving}
+                              onChange={(e) =>
+                                handleQuestionRequiredChange(question.id, e.target.checked)
+                              }
+                            />
+                            <span>Required</span>
+                          </label>
 
                           <div className="builder-question-controls">
                             <button

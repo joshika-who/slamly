@@ -9,11 +9,14 @@ import {
   serverTimestamp,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase/firestore';
 import { isFirebaseConfigured } from '../firebase/firebase';
 
 const BOOKS_COLLECTION = 'books';
+const RESPONSES_SUBCOLLECTION = 'responses';
+const DELETE_BATCH_SIZE = 400;
 
 export const ALLOWED_QUESTION_TYPES = [
   'short_answer',
@@ -25,7 +28,25 @@ export const ALLOWED_QUESTION_TYPES = [
 
 export const ALLOWED_COVER_THEMES = ['pink', 'lavender', 'peach', 'sage'];
 
-export const ALLOWED_BOOK_STATUSES = ['draft', 'published'];
+export const ALLOWED_BOOK_STATUSES = ['draft', 'published', 'closed'];
+
+export const BOOK_STATUS_META = {
+  draft: {
+    label: 'Draft',
+    badgeClass: 'status-draft',
+    shortNote: 'Private — only you can see this book. The public link is turned off.',
+  },
+  published: {
+    label: 'Published',
+    badgeClass: 'status-active',
+    shortNote: 'Open — anyone with your share link can fill out and submit a page.',
+  },
+  closed: {
+    label: 'Closed',
+    badgeClass: 'status-closed',
+    shortNote: 'Closed — your share link shows that this slam book is no longer accepting responses.',
+  },
+};
 
 export const QUESTION_TYPE_LABELS = {
   short_answer: 'Short Answer',
@@ -34,6 +55,17 @@ export const QUESTION_TYPE_LABELS = {
   multiple_choice: 'Multiple Choice',
   polaroid_prompt: 'Polaroid / Vibe Check',
 };
+
+/**
+ * Builds the public share URL for a slam book using its Firestore document ID.
+ */
+export function getBookShareUrl(bookId) {
+  const origin =
+    typeof window !== 'undefined' && window.location?.origin
+      ? window.location.origin
+      : '';
+  return `${origin}/s/${bookId}`;
+}
 
 /**
  * Generates a unique question ID when a question is created or copied from a template.
@@ -80,7 +112,7 @@ export function getFriendlyFirestoreError(error, fallbackMessage = 'Something we
 
   switch (code) {
     case 'permission-denied':
-      return 'Permission denied by Cloud Firestore. Make sure you are signed in as the book owner and that firestore.rules have been published in the Firebase Console.';
+      return 'Permission denied by Cloud Firestore. Make sure you are signed in as the book owner and that the latest firestore.rules have been published in the Firebase Console.';
     case 'not-found':
       return 'The requested slam book could not be found.';
     case 'unavailable':
@@ -95,14 +127,21 @@ export function getFriendlyFirestoreError(error, fallbackMessage = 'Something we
 }
 
 /**
- * Ensures Firestore is initialized and an authenticated userId is provided.
+ * Ensures Firestore is initialized.
  */
-function assertFirestoreAndUser(userId) {
+function assertFirestoreInitialized() {
   if (!isFirebaseConfigured || !db) {
     const err = new Error('Cloud Firestore is not configured. Please check your .env.local file.');
     err.isValidationError = true;
     throw err;
   }
+}
+
+/**
+ * Ensures Firestore is initialized and an authenticated userId is provided.
+ */
+function assertFirestoreAndUser(userId) {
+  assertFirestoreInitialized();
   if (!userId || typeof userId !== 'string') {
     const err = new Error('You must be logged in to manage slam books.');
     err.code = 'unauthenticated';
@@ -233,7 +272,7 @@ export function validateBookFields(bookData, { partial = false } = {}) {
 }
 
 /**
- * Normalizes a Firestore DocumentSnapshot into a clean JS object for UI components.
+ * Normalizes a Firestore DocumentSnapshot into a clean JS object for owner UI components.
  */
 function formatBookDoc(docSnap) {
   const data = docSnap.data();
@@ -268,8 +307,37 @@ function formatBookDoc(docSnap) {
 }
 
 /**
+ * Normalizes a Firestore DocumentSnapshot for the PUBLIC share page (/s/:bookId).
+ * Strictly omits `ownerId` and internal metadata so only public fields are returned.
+ */
+function formatPublicBookDoc(docSnap) {
+  const data = docSnap.data();
+  const sortedQuestions = Array.isArray(data.questions)
+    ? [...data.questions]
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        .map((q, index) => ({
+          id: q.id || `q_${index}`,
+          type: ALLOWED_QUESTION_TYPES.includes(q.type) ? q.type : 'short_answer',
+          text: (q.text || q.prompt || '').trim(),
+          required: Boolean(q.required),
+          options: Array.isArray(q.options) ? q.options : [],
+        }))
+    : [];
+
+  return {
+    id: docSnap.id,
+    title: data.title || 'Untitled Slam Book',
+    description: data.description || '',
+    coverTheme: ALLOWED_COVER_THEMES.includes(data.coverTheme) ? data.coverTheme : 'pink',
+    status: ALLOWED_BOOK_STATUSES.includes(data.status) ? data.status : 'draft',
+    questions: sortedQuestions,
+  };
+}
+
+/**
  * 1. createBook(userId, bookData)
  * Creates a new slam book document in `books/{bookId}` owned by `userId`.
+ * Uses `addDoc()` so Firestore always generates a non-guessable, non-sequential random ID.
  */
 export async function createBook(userId, bookData) {
   assertFirestoreAndUser(userId);
@@ -367,9 +435,62 @@ export async function getBookById(userId, bookId) {
 }
 
 /**
- * 4. updateBook(userId, bookId, changes)
+ * 4. getPublicBookById(bookId)
+ * Loads a single slam book for the public share page (/s/:bookId) using a single `getDoc()` call.
+ * - Never performs a list query.
+ * - Requires no authentication.
+ * - Treats missing books, draft books, and permission-denied responses identically as "Book not found".
+ * - Never returns `ownerId`.
+ */
+export async function getPublicBookById(bookId) {
+  assertFirestoreInitialized();
+
+  const cleanBookId = typeof bookId === 'string' ? bookId.trim() : '';
+  if (!cleanBookId) {
+    const notFoundErr = new Error('This slam book link is invalid or the book is not published.');
+    notFoundErr.code = 'book/not-found';
+    throw notFoundErr;
+  }
+
+  try {
+    const bookRef = doc(db, BOOKS_COLLECTION, cleanBookId);
+    const docSnap = await getDoc(bookRef);
+
+    if (!docSnap.exists()) {
+      const notFoundErr = new Error('This slam book could not be found or is still a private draft.');
+      notFoundErr.code = 'book/not-found';
+      throw notFoundErr;
+    }
+
+    const publicBook = formatPublicBookDoc(docSnap);
+
+    // Even if the owner views /s/:bookId while signed in, a draft book has no public access
+    if (publicBook.status === 'draft') {
+      const draftErr = new Error('This slam book could not be found or is still a private draft.');
+      draftErr.code = 'book/not-found';
+      throw draftErr;
+    }
+
+    return publicBook;
+  } catch (error) {
+    // Firestore denies `get` for logged-out visitors when a book does not exist or is a draft
+    if (error.code === 'book/not-found' || error.code === 'permission-denied') {
+      const notFoundErr = new Error(
+        'This slam book could not be found. It may still be a private draft or the link may be incorrect.'
+      );
+      notFoundErr.code = 'book/not-found';
+      throw notFoundErr;
+    }
+    throw new Error(getFriendlyFirestoreError(error, 'Could not load this slam book right now.'));
+  }
+}
+
+/**
+ * 5. updateBook(userId, bookId, changes)
  * Updates an existing book owned by `userId`.
  * Explicitly prevents modifying `ownerId` or `createdAt`, and sets `updatedAt`.
+ * When called with `{ status }` only (e.g. publishing, closing, or moving to draft),
+ * preserves all other existing book fields unchanged.
  */
 export async function updateBook(userId, bookId, changes = {}) {
   assertFirestoreAndUser(userId);
@@ -419,8 +540,9 @@ export async function updateBook(userId, bookId, changes = {}) {
 }
 
 /**
- * 5. deleteBook(userId, bookId)
- * Verifies ownership and permanently deletes a slam book from Firestore.
+ * 6. deleteBook(userId, bookId)
+ * Verifies ownership, deletes all documents in `books/{bookId}/responses` in batches of up to 400,
+ * and then permanently deletes the slam book document itself.
  */
 export async function deleteBook(userId, bookId) {
   assertFirestoreAndUser(userId);
@@ -429,11 +551,28 @@ export async function deleteBook(userId, bookId) {
   await getBookById(userId, bookId);
 
   try {
+    // Step 1: Delete all friend responses in `books/{bookId}/responses` in batches of up to 400
+    // (Must happen BEFORE deleting the parent book so Firestore rules can verify parent ownership)
+    const responsesRef = collection(db, BOOKS_COLLECTION, bookId, RESPONSES_SUBCOLLECTION);
+    const responsesSnapshot = await getDocs(responsesRef);
+
+    if (!responsesSnapshot.empty) {
+      const responseDocs = responsesSnapshot.docs;
+      for (let i = 0; i < responseDocs.length; i += DELETE_BATCH_SIZE) {
+        const chunk = responseDocs.slice(i, i + DELETE_BATCH_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach((responseDoc) => {
+          batch.delete(responseDoc.ref);
+        });
+        await batch.commit();
+      }
+    }
+
+    // Step 2: Delete the parent book document
     const bookRef = doc(db, BOOKS_COLLECTION, bookId);
     await deleteDoc(bookRef);
     return true;
   } catch (error) {
-    throw new Error(getFriendlyFirestoreError(error, 'Could not delete this slam book.'));
+    throw new Error(getFriendlyFirestoreError(error, 'Could not delete this slam book and its responses.'));
   }
 }
-

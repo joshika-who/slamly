@@ -4,8 +4,10 @@ import Button from '../components/Button';
 import { useAuth } from '../context/AuthContext';
 import { AuthLoadingScreen } from '../components/ProtectedRoute';
 import {
+  BOOK_STATUS_META,
   createQuestionId,
   getBookById,
+  getBookShareUrl,
   updateBook,
 } from '../services/bookService';
 import {
@@ -30,13 +32,32 @@ const QUESTION_TYPES = [
   { id: 'polaroid_prompt', label: 'Memory / Vibe Check' },
 ];
 
+async function copyTextToClipboard(text) {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  if (typeof document !== 'undefined') {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  }
+}
+
 /**
  * EditBook Page (/books/:bookId/edit)
  * Protected route for editing an existing slam book owned by the signed-in user:
  * - Loads the book from Firestore via `getBookById(user.uid, bookId)`.
  * - Displays a friendly "Book not found" screen if the book does not exist or belongs to another user.
+ * - Lets the owner publish a draft, close/reopen a published book, move back to draft,
+ *   and copy the public share link (`/s/:bookId`) when published.
  * - Saves changes using `updateBook(user.uid, bookId, changes)` (never creating a duplicate book).
- * - Preserves existing questions and metadata.
  */
 function EditBook() {
   const { bookId } = useParams();
@@ -51,17 +72,22 @@ function EditBook() {
   const [bookDescription, setBookDescription] = useState('');
   const [coverTheme, setCoverTheme] = useState('pink');
   const [bookStatus, setBookStatus] = useState('draft');
+  const [savedStatus, setSavedStatus] = useState('draft');
   const [templateId, setTemplateId] = useState(null);
   const [questions, setQuestions] = useState([]);
 
   const [newPrompt, setNewPrompt] = useState('');
   const [newType, setNewType] = useState('short_answer');
+  const [newRequired, setNewRequired] = useState(false);
   const [newOptionsText, setNewOptionsText] = useState('Option 1, Option 2');
 
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const shareUrl = getBookShareUrl(bookId);
 
   useEffect(() => {
     let isMounted = true;
@@ -80,11 +106,13 @@ function EditBook() {
         setBookDescription(loadedBook.description);
         setCoverTheme(loadedBook.coverTheme);
         setBookStatus(loadedBook.status);
+        setSavedStatus(loadedBook.status);
         setTemplateId(loadedBook.templateId);
         setQuestions(
           loadedBook.questions.map((q, index) => ({
             ...q,
             text: q.text || q.prompt || '',
+            required: Boolean(q.required),
             order: index,
           }))
         );
@@ -175,6 +203,47 @@ function EditBook() {
     );
   }
 
+  const handleCopyShareLink = async () => {
+    try {
+      await copyTextToClipboard(shareUrl);
+      setCopiedLink(true);
+      setTimeout(() => {
+        setCopiedLink(false);
+      }, 2500);
+    } catch {
+      // Ignore clipboard failures
+    }
+  };
+
+  /**
+   * Immediately updates ONLY the book's status in Firestore via updateBook()
+   * without altering any other saved field.
+   */
+  const handleQuickStatusChange = async (nextStatus) => {
+    if (isSaving) return;
+    setErrorMessage('');
+    setSuccessMessage('');
+    setIsSaving(true);
+
+    try {
+      const updated = await updateBook(user.uid, bookId, { status: nextStatus });
+      setBookStatus(updated.status);
+      setSavedStatus(updated.status);
+
+      if (nextStatus === 'published') {
+        setSuccessMessage('Book published! Your public share link is now live.');
+      } else if (nextStatus === 'closed') {
+        setSuccessMessage('Book closed! Friends visiting the link will see that responses are closed.');
+      } else {
+        setSuccessMessage('Book moved back to Draft (private).');
+      }
+    } catch (error) {
+      setErrorMessage(error.message || 'Could not update book status.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleAddQuestion = (event) => {
     event.preventDefault();
     setErrorMessage('');
@@ -196,7 +265,7 @@ function EditBook() {
       text: trimmed,
       type: newType,
       order: questions.length,
-      required: false,
+      required: Boolean(newRequired),
     };
 
     if (newType === 'multiple_choice') {
@@ -209,6 +278,7 @@ function EditBook() {
 
     setQuestions((prev) => [...prev, nextQuestion]);
     setNewPrompt('');
+    setNewRequired(false);
     setIsDirty(true);
   };
 
@@ -237,6 +307,14 @@ function EditBook() {
   const handleQuestionTextChange = (questionId, updatedText) => {
     setQuestions((prev) =>
       prev.map((q) => (q.id === questionId ? { ...q, text: updatedText } : q))
+    );
+    setIsDirty(true);
+    setSuccessMessage('');
+  };
+
+  const handleQuestionRequiredChange = (questionId, isRequired) => {
+    setQuestions((prev) =>
+      prev.map((q) => (q.id === questionId ? { ...q, required: Boolean(isRequired) } : q))
     );
     setIsDirty(true);
     setSuccessMessage('');
@@ -292,6 +370,7 @@ function EditBook() {
       });
 
       setBookStatus(updated.status);
+      setSavedStatus(updated.status);
       setIsDirty(false);
       setSuccessMessage(`Changes saved to "${updated.title}"!`);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -302,6 +381,9 @@ function EditBook() {
       setIsSaving(false);
     }
   };
+
+  const currentStatusMeta = BOOK_STATUS_META[bookStatus] || BOOK_STATUS_META.draft;
+  const savedStatusMeta = BOOK_STATUS_META[savedStatus] || BOOK_STATUS_META.draft;
 
   return (
     <div className="builder-page">
@@ -338,6 +420,106 @@ function EditBook() {
             </div>
           </div>
         )}
+
+        {/* Public Sharing & Status Control Panel */}
+        <section
+          className="paper-card edit-sharing-panel"
+          aria-labelledby="sharing-status-heading"
+        >
+          <div className="edit-sharing-panel__top">
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <h2 id="sharing-status-heading" style={{ fontSize: '1.35rem', margin: 0 }}>
+                  Sharing &amp; Book Status
+                </h2>
+                <span className={`status-badge ${savedStatusMeta.badgeClass}`}>
+                  {savedStatusMeta.label}
+                </span>
+              </div>
+              <p className="book-status-note" style={{ marginTop: '6px', marginBottom: 0 }}>
+                {savedStatusMeta.shortNote}
+              </p>
+            </div>
+
+            <div className="book-status-actions">
+              {savedStatus === 'draft' && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={isSaving}
+                  onClick={() => handleQuickStatusChange('published')}
+                >
+                  {isSaving ? 'Updating...' : 'Publish Book'}
+                </Button>
+              )}
+
+              {savedStatus === 'published' && (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={isSaving}
+                    onClick={() => handleQuickStatusChange('closed')}
+                  >
+                    {isSaving ? 'Updating...' : 'Close Responses'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={isSaving}
+                    onClick={() => handleQuickStatusChange('draft')}
+                  >
+                    Move to Draft
+                  </Button>
+                </>
+              )}
+
+              {savedStatus === 'closed' && (
+                <>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={isSaving}
+                    onClick={() => handleQuickStatusChange('published')}
+                  >
+                    {isSaving ? 'Updating...' : 'Reopen Book'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={isSaving}
+                    onClick={() => handleQuickStatusChange('draft')}
+                  >
+                    Move to Draft
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Share Link — ONLY shown when the book is Published */}
+          {savedStatus === 'published' && (
+            <div className="book-share-box" style={{ marginTop: '14px' }}>
+              <div className="book-share-box__url" title={shareUrl}>
+                {shareUrl}
+              </div>
+              <div className="book-share-box__actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleCopyShareLink}
+                >
+                  {copiedLink ? 'Copied!' : 'Copy Share Link'}
+                </button>
+                {copiedLink && (
+                  <span className="sr-only" role="status" aria-live="polite">
+                    Share link copied to clipboard!
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
 
         <div className="builder-grid">
           {/* Left Column: Editor */}
@@ -440,9 +622,11 @@ function EditBook() {
                       setSuccessMessage('');
                     }}
                   >
-                    <option value="published">Published (Ready on my shelf)</option>
-                    <option value="draft">Draft (Still working on questions)</option>
+                    <option value="published">Published (Public link open for friend responses)</option>
+                    <option value="closed">Closed (Public link shows responses are closed)</option>
+                    <option value="draft">Draft (Private — only visible to you)</option>
                   </select>
+                  <span className="form-hint">{currentStatusMeta.shortNote}</span>
                 </div>
               </div>
 
@@ -453,7 +637,7 @@ function EditBook() {
                     Questions ({questions.length}/50)
                   </h2>
                   <span className="form-hint">
-                    Edit prompts, change question types, or reorder with the Up/Down buttons.
+                    Edit prompts, toggle Required, change question types, or reorder with Up/Down.
                   </span>
                 </div>
 
@@ -487,6 +671,18 @@ function EditBook() {
                               </option>
                             ))}
                           </select>
+
+                          <label className="question-required-toggle">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(question.required)}
+                              disabled={isSaving}
+                              onChange={(e) =>
+                                handleQuestionRequiredChange(question.id, e.target.checked)
+                              }
+                            />
+                            <span>Required</span>
+                          </label>
 
                           <div className="builder-question-controls">
                             <button
@@ -616,9 +812,21 @@ function EditBook() {
                     </div>
                   )}
 
-                  <Button type="submit" variant="secondary" size="sm" disabled={isSaving}>
-                    + Add Question
-                  </Button>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                    <label className="question-required-toggle">
+                      <input
+                        type="checkbox"
+                        checked={newRequired}
+                        disabled={isSaving}
+                        onChange={(e) => setNewRequired(e.target.checked)}
+                      />
+                      <span>Make this question required</span>
+                    </label>
+
+                    <Button type="submit" variant="secondary" size="sm" disabled={isSaving}>
+                      + Add Question
+                    </Button>
+                  </div>
                 </form>
               </div>
 
@@ -657,7 +865,7 @@ function EditBook() {
                   <StarSticker size={20} />
                 </div>
                 <span className="live-preview-card__eyebrow">
-                  Live Preview &bull; {bookStatus === 'published' ? 'Published' : 'Draft'}
+                  Live Preview &bull; {currentStatusMeta.label}
                 </span>
                 <h2 className="live-preview-card__title">
                   {bookTitle || 'Untitled Slam Book'}
@@ -672,6 +880,7 @@ function EditBook() {
                   <div key={q.id} className="live-preview-field">
                     <span className="live-preview-field__label">
                       {idx + 1}. {q.text || 'Untitled question'}
+                      {q.required ? ' *' : ''}
                     </span>
                     <div className="live-preview-field__line" aria-hidden="true">
                       {q.type === 'multiple_choice' && Array.isArray(q.options)
@@ -692,4 +901,3 @@ function EditBook() {
 }
 
 export default EditBook;
-

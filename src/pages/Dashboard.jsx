@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Button from '../components/Button';
 import BookCard from '../components/BookCard';
 import { useAuth } from '../context/AuthContext';
-import { deleteBook, getUserBooks } from '../services/bookService';
+import { deleteBook, getUserBooks, updateBook } from '../services/bookService';
 import {
   FlowerSticker,
   HeartSticker,
@@ -15,10 +15,10 @@ import {
  * Dashboard Page (/dashboard)
  * Displays the authenticated user's real slam books from Cloud Firestore (`books/{bookId}`):
  * - Queries only books where `ownerId == user.uid`, ordered newest first.
- * - Shows title, cover theme, status ("published" or "draft"), question count, and creation date.
- * - Provides Edit (`/books/:bookId/edit`) and Delete (with confirmation dialog).
- * - Shows loading state while fetching, handles Firestore errors gracefully, and renders a
- *   scrapbook-themed empty state when the user has no saved books yet.
+ * - Shows title, cover theme, status ("published", "closed", or "draft"), question count, and creation date.
+ * - Lets the owner publish drafts, close/reopen published books, move books back to draft,
+ *   and copy the public share link (`/s/:bookId`) for published books.
+ * - Provides Edit (`/books/:bookId/edit`) and Delete (which deletes all responses in batches and then the book).
  */
 function Dashboard() {
   const navigate = useNavigate();
@@ -38,6 +38,9 @@ function Dashboard() {
   const [statusFilter, setStatusFilter] = useState('All');
 
   const [flashMessage, setFlashMessage] = useState(location.state?.flashMessage || '');
+  const [statusError, setStatusError] = useState('');
+  const [updatingBookId, setUpdatingBookId] = useState(null);
+
   const [bookToDelete, setBookToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -70,7 +73,44 @@ function Dashboard() {
       : books.filter((book) => book.status.toLowerCase() === statusFilter.toLowerCase());
 
   const publishedCount = books.filter((book) => book.status === 'published').length;
+  const closedCount = books.filter((book) => book.status === 'closed').length;
   const draftCount = books.filter((book) => book.status === 'draft').length;
+
+  const handleStatusChange = async (book, nextStatus) => {
+    if (!user?.uid || updatingBookId) return;
+    setUpdatingBookId(book.id);
+    setStatusError('');
+    setFlashMessage('');
+
+    try {
+      const updated = await updateBook(user.uid, book.id, { status: nextStatus });
+      setBooks((prev) =>
+        prev.map((item) =>
+          item.id === book.id ? { ...item, status: updated.status } : item
+        )
+      );
+
+      if (nextStatus === 'published') {
+        setFlashMessage(
+          `"${book.title}" is now Published! Copy the share link on its card to invite friends.`
+        );
+      } else if (nextStatus === 'closed') {
+        setFlashMessage(
+          `"${book.title}" is now Closed and is no longer accepting new friend responses.`
+        );
+      } else {
+        setFlashMessage(
+          `"${book.title}" has been moved back to Draft (private).`
+        );
+      }
+    } catch (error) {
+      setStatusError(
+        error.message || 'Could not update the status of this slam book.'
+      );
+    } finally {
+      setUpdatingBookId(null);
+    }
+  };
 
   const handleRequestDelete = (book) => {
     setDeleteError('');
@@ -87,7 +127,9 @@ function Dashboard() {
       const deletedTitle = bookToDelete.title;
       setBooks((prev) => prev.filter((b) => b.id !== bookToDelete.id));
       setBookToDelete(null);
-      setFlashMessage(`Deleted "${deletedTitle}" from your shelf.`);
+      setFlashMessage(
+        `Deleted "${deletedTitle}" and all of its friend responses from your shelf.`
+      );
     } catch (error) {
       setDeleteError(error.message || 'Could not delete this slam book.');
     } finally {
@@ -131,6 +173,12 @@ function Dashboard() {
           </div>
         )}
 
+        {statusError && (
+          <div className="auth-alert auth-alert--error" role="alert">
+            {statusError}
+          </div>
+        )}
+
         {/* Welcome Header Banner */}
         <header className="dashboard-welcome-card paper-card">
           <span className="washi-tape" aria-hidden="true" />
@@ -144,8 +192,8 @@ function Dashboard() {
                 Welcome back, {displayUserName}!
               </h1>
               <p className="dashboard-header__subtitle">
-                Create, customise, and manage your personal digital slam books. Everything on your
-                shelf is private to your account.
+                Create, customise, and share your personal digital slam books. Publish a book to get
+                its public share link, or close it anytime when you are done collecting responses.
               </p>
             </div>
 
@@ -178,11 +226,28 @@ function Dashboard() {
               <span className="dashboard-stat-pill__label">Published</span>
             </div>
             <div className="dashboard-stat-pill">
+              <span className="dashboard-stat-pill__value">{closedCount}</span>
+              <span className="dashboard-stat-pill__label">Closed</span>
+            </div>
+            <div className="dashboard-stat-pill">
               <span className="dashboard-stat-pill__value">{draftCount}</span>
               <span className="dashboard-stat-pill__label">Drafts</span>
             </div>
           </div>
         </header>
+
+        {/* Milestone 4 Info Note: Responses viewing coming in Milestone 5 */}
+        <div
+          className="preview-inline-notice"
+          style={{ marginBottom: '24px' }}
+          role="note"
+        >
+          <p style={{ margin: 0 }}>
+            <strong>Friend Responses:</strong> When your book is <strong>Published</strong>, friends
+            can submit pages using your share link without needing an account. Responses are stored
+            privately under your book and will be viewable here in the next update.
+          </p>
+        </div>
 
         {/* My Slam Books Section */}
         <section className="dashboard-books-section" aria-labelledby="my-books-heading">
@@ -202,7 +267,7 @@ function Dashboard() {
                 role="group"
                 aria-label="Filter slam books by status"
               >
-                {['All', 'Published', 'Draft'].map((tab) => (
+                {['All', 'Published', 'Closed', 'Draft'].map((tab) => (
                   <button
                     key={tab}
                     type="button"
@@ -291,6 +356,8 @@ function Dashboard() {
                   key={book.id}
                   book={book}
                   onDeleteRequest={handleRequestDelete}
+                  onStatusChange={handleStatusChange}
+                  isUpdatingStatus={updatingBookId === book.id}
                 />
               ))}
             </div>
@@ -315,8 +382,8 @@ function Dashboard() {
                   Delete &ldquo;{bookToDelete.title}&rdquo;?
                 </h3>
                 <p className="modal-card__subtitle">
-                  This action permanently removes this slam book and all of its questions from your
-                  shelf. This cannot be undone.
+                  This action permanently removes this slam book, all of its questions, and{' '}
+                  <strong>all friend responses</strong> collected for it. This cannot be undone.
                 </p>
               </div>
               <button
@@ -350,7 +417,7 @@ function Dashboard() {
                 onClick={handleConfirmDelete}
                 disabled={isDeleting}
               >
-                {isDeleting ? 'Deleting...' : 'Yes, Delete Book'}
+                {isDeleting ? 'Deleting Book & Responses...' : 'Yes, Delete Book & Responses'}
               </Button>
             </div>
           </div>
