@@ -18,6 +18,12 @@ import {
   updateResponse,
 } from '../services/responseService';
 import {
+  MAX_EXPORT_RESPONSES,
+  exportBookToPdf,
+  fetchAllResponses,
+  scanUnsupportedPdfCharacters,
+} from '../services/pdfExportService';
+import {
   FlowerSticker,
   HeartSticker,
   PolaroidIllustration,
@@ -44,13 +50,13 @@ async function copyTextToClipboard(text) {
 
 /**
  * BookResponses Page (/books/:bookId/responses)
- * Protected owner-only page for viewing, searching, editing, and deleting friend responses:
+ * Protected owner-only page for viewing, searching, editing, deleting, and exporting friend responses:
  * - Verifies ownership by loading the book via `getBookById(user.uid, bookId)`.
  * - Shows "Book not found" if the book is missing or owned by another user.
  * - Loads responses newest first (25 per page) via `getBookResponses` and total count via `getResponseCount`.
- * - Supports client-side search by respondent name or answer text.
- * - Allows editing respondentName and answers via `updateResponse` (preserving `createdAt`).
- * - Allows deleting individual responses with a confirmation dialog via `deleteResponse`.
+ * - Lets the owner export responses as a scrapbook A4 PDF via `fetchAllResponses` + `exportBookToPdf`,
+ *   with pre-export character scanning for non-Latin scripts/emoji.
+ * - Supports client-side search, inline editing (`updateResponse`), and deletion (`deleteResponse`).
  */
 function BookResponses() {
   const { bookId } = useParams();
@@ -80,6 +86,11 @@ function BookResponses() {
   // Notification banners
   const [flashMessage, setFlashMessage] = useState('');
   const [actionError, setActionError] = useState('');
+
+  // PDF Export state
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [pdfExportError, setPdfExportError] = useState('');
+  const [pendingPdfWarning, setPendingPdfWarning] = useState(null); // { allResponses, capped, scanResult }
 
   // Inline Edit state
   const [editingResponseId, setEditingResponseId] = useState(null);
@@ -196,6 +207,94 @@ function BookResponses() {
     } catch {
       // Ignore clipboard permission errors
     }
+  };
+
+  /**
+   * Finalizes PDF creation & download after character check passes or owner confirms.
+   */
+  const runPdfGeneration = async (allResponses, wasCapped) => {
+    if (!book) return;
+    setIsExportingPdf(true);
+    setPdfExportError('');
+    setFlashMessage('');
+
+    try {
+      const result = await exportBookToPdf(book, allResponses);
+      if (wasCapped) {
+        setFlashMessage(
+          `Downloaded "${result.fileName}"! Note: Only the first ${MAX_EXPORT_RESPONSES} responses were exported (safety cap reached).`
+        );
+      } else {
+        setFlashMessage(
+          `Downloaded "${result.fileName}" (${result.exportedCount} ${
+            result.exportedCount === 1 ? 'response' : 'responses'
+          }, ${result.pageCount} ${result.pageCount === 1 ? 'page' : 'pages'})!`
+        );
+      }
+    } catch (error) {
+      setPdfExportError(
+        error.message || 'Could not generate your PDF memory book. Please try again.'
+      );
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
+  /**
+   * Triggered when the owner clicks "Download PDF":
+   * 1. Fetches all responses up to the 500-response safety cap via `fetchAllResponses`.
+   * 2. Scans for characters unsupported by built-in PDF fonts (emoji, Tamil, Hindi, etc.).
+   * 3. Either shows the warning dialog or generates and downloads the PDF immediately.
+   */
+  const handleStartPdfExport = async () => {
+    if (!user?.uid || !book || totalCount === 0 || isExportingPdf) return;
+
+    setIsExportingPdf(true);
+    setPdfExportError('');
+    setActionError('');
+    setFlashMessage('');
+
+    try {
+      const allResponses = await fetchAllResponses(user.uid, bookId);
+      const wasCapped = Boolean(allResponses.capped);
+
+      if (allResponses.length === 0) {
+        setPdfExportError('There are no responses available to export yet.');
+        setIsExportingPdf(false);
+        return;
+      }
+
+      const scanResult = scanUnsupportedPdfCharacters(book, allResponses);
+
+      if (scanResult.hasUnsupported) {
+        // Pause and ask the owner whether to download anyway (replacing unsupported chars with ?) or cancel
+        setPendingPdfWarning({
+          allResponses,
+          capped: wasCapped,
+          scanResult,
+        });
+        setIsExportingPdf(false);
+        return;
+      }
+
+      await runPdfGeneration(allResponses, wasCapped);
+    } catch (error) {
+      setPdfExportError(
+        error.message || 'Could not fetch responses for PDF export. Please try again.'
+      );
+      setIsExportingPdf(false);
+    }
+  };
+
+  const handleConfirmPdfDownloadAnyway = async () => {
+    if (!pendingPdfWarning) return;
+    const { allResponses, capped } = pendingPdfWarning;
+    setPendingPdfWarning(null);
+    await runPdfGeneration(allResponses, capped);
+  };
+
+  const handleCancelPdfWarning = () => {
+    setPendingPdfWarning(null);
   };
 
   // Start editing a response card
@@ -381,6 +480,7 @@ function BookResponses() {
   const statusKey = BOOK_STATUS_META[book.status] ? book.status : 'draft';
   const statusMeta = BOOK_STATUS_META[statusKey];
   const isPublished = statusKey === 'published';
+  const isExportDisabled = isLoadingResponses || totalCount === 0 || isExportingPdf;
 
   return (
     <div className="responses-page">
@@ -425,7 +525,23 @@ function BookResponses() {
           </div>
         )}
 
-        {/* Book Summary & Total Response Count Header */}
+        {pdfExportError && (
+          <div className="auth-alert auth-alert--error" role="alert">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+              <span>{pdfExportError}</span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleStartPdfExport}
+                disabled={isExportingPdf || totalCount === 0}
+              >
+                Retry PDF Export
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Book Summary, Total Response Count & Download PDF Header */}
         <header className={`paper-card responses-header-card live-preview-card--${book.coverTheme}`}>
           <span className="washi-tape" aria-hidden="true" />
 
@@ -449,11 +565,37 @@ function BookResponses() {
               </p>
             </div>
 
-            <div className="responses-count-box" aria-label="Total responses collected">
-              <span className="responses-count-box__number">{totalCount}</span>
-              <span className="responses-count-box__label">
-                {totalCount === 1 ? 'Friend Page' : 'Friend Pages'}
-              </span>
+            <div className="responses-header-card__aside">
+              <div className="responses-count-box" aria-label="Total responses collected">
+                <span className="responses-count-box__number">{totalCount}</span>
+                <span className="responses-count-box__label">
+                  {totalCount === 1 ? 'Friend Page' : 'Friend Pages'}
+                </span>
+              </div>
+
+              <div className="responses-pdf-action">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleStartPdfExport}
+                  disabled={isExportDisabled}
+                  aria-describedby={!isLoadingResponses && totalCount === 0 ? 'pdf-disabled-note' : undefined}
+                >
+                  {isExportingPdf ? 'Preparing your memory book...' : 'Download PDF'}
+                </Button>
+
+                {isExportingPdf && (
+                  <span className="form-hint" role="status" aria-live="polite">
+                    Preparing your memory book...
+                  </span>
+                )}
+
+                {!isLoadingResponses && totalCount === 0 && (
+                  <span id="pdf-disabled-note" className="form-hint">
+                    Collect at least 1 response to download a PDF keepsake.
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -541,7 +683,7 @@ function BookResponses() {
                 Try Again
               </Button>
               <Button to="/dashboard" variant="secondary">
-                &larr; Back to Dashboard
+                &larr; Return to Dashboard
               </Button>
             </div>
           </div>
@@ -803,6 +945,81 @@ function BookResponses() {
         )}
       </div>
 
+      {/* Unsupported PDF Characters Warning Modal */}
+      {pendingPdfWarning && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pdf-char-warning-title"
+        >
+          <div className="paper-card modal-card">
+            <span className="washi-tape tape-lavender" aria-hidden="true" />
+            <div className="modal-card__header">
+              <div>
+                <span className="badge badge--peach">Character Support Notice</span>
+                <h3 id="pdf-char-warning-title" className="modal-card__title">
+                  Some characters cannot be rendered in standard PDF fonts
+                </h3>
+                <p className="modal-card__subtitle">
+                  The built-in PDF fonts support standard Latin letters (including accented characters
+                  like &eacute; and &ntilde;), numbers, and punctuation, but cannot render emoji or
+                  non-Latin scripts (such as Tamil, Hindi, Arabic, or Chinese).
+                </p>
+                <div className="preview-inline-notice" style={{ marginTop: '12px' }}>
+                  <p style={{ margin: 0, fontWeight: 700 }}>
+                    Affected items found in this slam book:
+                  </p>
+                  <ul style={{ margin: '6px 0 0 18px', fontSize: '0.9rem' }}>
+                    {pendingPdfWarning.scanResult.affectedNamesCount > 0 && (
+                      <li>
+                        <strong>{pendingPdfWarning.scanResult.affectedNamesCount}</strong>{' '}
+                        {pendingPdfWarning.scanResult.affectedNamesCount === 1
+                          ? 'respondent name'
+                          : 'respondent names'}
+                      </li>
+                    )}
+                    {pendingPdfWarning.scanResult.affectedAnswersCount > 0 && (
+                      <li>
+                        <strong>{pendingPdfWarning.scanResult.affectedAnswersCount}</strong>{' '}
+                        {pendingPdfWarning.scanResult.affectedAnswersCount === 1
+                          ? 'question/answer field'
+                          : 'question/answer fields'}
+                      </li>
+                    )}
+                    {pendingPdfWarning.scanResult.affectedBookFieldsCount > 0 && (
+                      <li>
+                        <strong>{pendingPdfWarning.scanResult.affectedBookFieldsCount}</strong>{' '}
+                        {pendingPdfWarning.scanResult.affectedBookFieldsCount === 1
+                          ? 'book title/description field'
+                          : 'book title/description fields'}
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={handleCancelPdfWarning}
+                aria-label="Cancel PDF export"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="modal-card__footer" style={{ flexWrap: 'wrap' }}>
+              <Button variant="secondary" onClick={handleCancelPdfWarning}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={handleConfirmPdfDownloadAnyway}>
+                Download anyway (unsupported characters will be replaced with ?)
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Response Confirmation Modal */}
       {responseToDelete && (
         <div
@@ -867,4 +1084,3 @@ function BookResponses() {
 }
 
 export default BookResponses;
-

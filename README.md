@@ -6,13 +6,14 @@ Slamly brings the nostalgic school and college slam book tradition into a warm, 
 
 ---
 
-## Current Status: Milestone 5 (Response Management)
+## Current Status: Milestone 6 (PDF Memory Export)
 
 - **Milestone 1 (Complete):** Multi-page React + Vite + React Router v6 foundation, nostalgic scrapbook UI system, WCAG 2.1 AA accessibility, and responsive layouts.
 - **Milestone 2 (Complete):** Real **Firebase Authentication (Email/Password)** with `AuthContext`, `ProtectedRoute`, `PublicOnlyRoute`, Signup, Login, Password Reset, and Logout.
 - **Milestone 3 (Complete):** Real **Cloud Firestore (`books/{bookId}`)** integration with `src/firebase/firestore.js`, `src/services/bookService.js`, template & blank book creation, editing saved books (`/books/:bookId/edit`), deleting books with confirmation, and version-controlled `firestore.rules`.
 - **Milestone 4 (Complete):** **Public Sharing & Friend Responses** at `/s/:bookId` with single-document public reads (`getPublicBookById`), `"draft"` / `"published"` / `"closed"` book lifecycle controls, copyable share links, friend response submissions (`books/{bookId}/responses/{responseId}` via `src/services/responseService.js`), batched response cleanup on book deletion, and updated `firestore.rules`.
 - **Milestone 5 (Complete):** **Owner Response Management** at `/books/:bookId/responses` (`src/pages/BookResponses.jsx`) with paginated newest-first responses (`getBookResponses`), server response counts (`getResponseCount`), client-side search, inline response editing (`updateResponse` preserving `createdAt`), single-response deletion (`deleteResponse`), and lazy-loaded dashboard response counts.
+- **Milestone 6 (Complete):** **PDF Memory Export** (`src/services/pdfExportService.js`) with lazy-loaded `jsPDF`, paginated response fetching up to 500 responses (`fetchAllResponses`), scrapbook-styled A4 portrait PDF generation (`exportBookToPdf`) with vector cover page, page-break protection, "Slamly / Page X of Y" footers, and pre-export character support scanning.
 
 ---
 
